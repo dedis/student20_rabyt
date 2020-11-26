@@ -17,6 +17,11 @@ type NodeID interface {
 	CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, error)
 }
 
+// TODO: calculate these parameters from the number of players
+func BaseAndLenFromPlayers(numPlayers int) (byte, int) {
+	return 16, 3
+}
+
 type ArrayNodeID struct {
 	id   []byte
 	base byte
