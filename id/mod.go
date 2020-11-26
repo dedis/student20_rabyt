@@ -2,6 +2,7 @@ package id
 
 import (
 	"crypto/sha256"
+	"errors"
 	"go.dedis.ch/dela/mino"
 	"math/big"
 )
@@ -10,6 +11,12 @@ type Id interface {
 	GetLength() int
 	GetBase() byte
 	GetDigit(pos int) byte
+	CommonPrefix(other Id) Prefix
+	PrefixUntilFirstDifferentDigit(other Id) (Prefix, error)
+}
+
+func BaseAndLenFromPlayers(numPlayers int) (base byte, len int) {
+	return 16, 3
 }
 
 type ArrayId struct {
@@ -42,6 +49,32 @@ func (id ArrayId) GetBase() byte {
 
 func (id ArrayId) GetDigit(pos int) byte {
 	return id.Id[pos]
+}
+
+func (id ArrayId) CommonPrefix(other Id) Prefix {
+	// TODO: report an error if bases or lengths are different
+	prefix := []byte{}
+	for i := 0; i < id.GetLength(); i++ {
+		if id.GetDigit(i) != other.GetDigit(i) {
+			break
+		}
+		prefix = id.Id[0:i]
+	}
+	return PrefixImpl{string(prefix), id.Base}
+}
+
+func (id ArrayId) PrefixUntilFirstDifferentDigit(other Id) (Prefix, error) {
+	if id.GetBase() != other.GetBase() {
+		return nil, errors.New("can't compare ids of different bases")
+	}
+	if id.GetLength() != other.GetLength() {
+		return nil, errors.New("can't compare ids of different lengths")
+	}
+	commonPrefix := id.CommonPrefix(other)
+	if commonPrefix.GetLength() == id.GetLength() {
+		return nil, errors.New("ids are equal")
+	}
+	return commonPrefix.Append(id.GetDigit(commonPrefix.GetLength())), nil
 }
 
 func hash(addr mino.Address) (h *big.Int) {
