@@ -22,12 +22,12 @@ func MakeArrayId(address mino.Address, base byte, len int) Id {
 	h := hash(address)
 	bigBase := big.NewInt(int64(base))
 	bigLen := big.NewInt(int64(len))
-	h.Mod(&h, bigBase.Exp(bigBase, bigLen, nil))
+	h.Mod(h, bigBase.Exp(bigBase, bigLen, nil))
 	curDigit := big.NewInt(0)
 	id := make([]byte, len)
 	for i := 0; i < len; i++ {
-		id[i] = byte(curDigit.Mod(&h, bigBase).Int64())
-		h.Div(&h, bigBase)
+		id[i] = byte(curDigit.Mod(h, bigBase).Int64())
+		h.Div(h, bigBase)
 	}
 	return ArrayId{id, base}
 }
@@ -44,14 +44,17 @@ func (id ArrayId) GetDigit(pos int) byte {
 	return id.Id[pos]
 }
 
-func hash(addr mino.Address) (h big.Int) {
+func hash(addr mino.Address) (h *big.Int) {
 	sha := sha256.New()
 	sha.Write([]byte(addr.String()))
 
-	var power int64 = 0
+	totalPower := big.NewInt(1)
+	power := big.NewInt(8)
+	h = big.NewInt(0)
 	for _, value := range sha.Sum(nil) {
-		h.Add(&h, big.NewInt(int64(value)*power))
-		power <<= 8
+		bigValue := big.NewInt(int64(value))
+		h.Add(h, bigValue.Mul(totalPower, bigValue))
+		totalPower.Mul(totalPower, power)
 	}
 	return
 }
