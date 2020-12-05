@@ -22,9 +22,9 @@ var hsFormats = registry.NewSimpleRegistry()
 
 func NewHandshake(idBase uint8, thisAddress mino.Address, addresses []mino.Address) Handshake {
 	return Handshake{
-		idBase: idBase,
+		idBase:      idBase,
 		thisAddress: thisAddress,
-		addresses: addresses,
+		addresses:   addresses,
 	}
 }
 

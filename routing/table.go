@@ -22,8 +22,8 @@ type RoutingTable struct {
 
 // Implements router.Router
 type Router struct {
-	packetFac   router.PacketFactory
-	hsFac       router.HandshakeFactory
+	packetFac router.PacketFactory
+	hsFac     router.HandshakeFactory
 }
 
 // NewRouter returns a new router.
