@@ -1,19 +1,21 @@
 package id
 
 type Prefix interface {
-	GetLength() int
-	isPrefixOf(Id) bool
+	Length() int
+	IsPrefixOf(NodeID) bool
 	Append(byte) Prefix
 }
 
-// Digits of the prefix have to be stored in a string, because this structure is used as a key in the routing table map.
-type PrefixImpl struct {
+// Digits of the prefix have to be stored in a string, because this structure
+// is used as a key in the routing table map.
+type StringPrefix struct {
 	Digits string
 	Base   byte
 }
 
-func (prefix PrefixImpl) isPrefixOf(id Id) bool {
-	if prefix.Base != id.GetBase() {
+// Tests if this prefix is a prefix of given id
+func (prefix StringPrefix) IsPrefixOf(id NodeID) bool {
+	if prefix.Base != id.Base() {
 		return false
 	}
 	for i := 0; i < len(prefix.Digits); i++ {
@@ -24,10 +26,12 @@ func (prefix PrefixImpl) isPrefixOf(id Id) bool {
 	return true
 }
 
-func (prefix PrefixImpl) GetLength() int {
+// Returns the length of prefix
+func (prefix StringPrefix) Length() int {
 	return len(prefix.Digits)
 }
 
-func (prefix PrefixImpl) Append(digit byte) Prefix {
-	return PrefixImpl{prefix.Digits + string(digit), prefix.Base}
+// Constructs a new prefix by appending the digit to this prefix
+func (prefix StringPrefix) Append(digit byte) Prefix {
+	return StringPrefix{prefix.Digits + string(digit), prefix.Base}
 }
