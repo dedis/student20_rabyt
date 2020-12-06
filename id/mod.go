@@ -6,19 +6,20 @@ import (
 	"math/big"
 )
 
-type Id interface {
-	GetLength() int
-	GetBase() byte
+type NodeID interface {
+	Length() int
+	Base() byte
 	GetDigit(pos int) byte
 }
 
-type ArrayId struct {
-	Id   []byte
-	Base byte
+type ArrayNodeID struct {
+	id   []byte
+	base byte
 }
 
-// Constructs an Id by taking a hash of the address modulo (base ^ len), then presenting the id as an array of digits.
-func MakeArrayId(address mino.Address, base byte, len int) Id {
+// Constructs a NodeID by taking a hash of the address modulo (base ^ len),
+// then presenting the id as an array of digits.
+func NewArrayNodeID(address mino.Address, base byte, len int) ArrayNodeID {
 	h := hash(address)
 	bigBase := big.NewInt(int64(base))
 	bigLen := big.NewInt(int64(len))
@@ -31,32 +32,41 @@ func MakeArrayId(address mino.Address, base byte, len int) Id {
 		id[i] = byte(curDigit.Mod(h, bigBase).Int64())
 		h.Div(h, bigBase)
 	}
-	return ArrayId{id, base}
+	return ArrayNodeID{id, base}
 }
 
-func (id ArrayId) GetLength() int {
-	return len(id.Id)
+// Returns the length of id
+func (id ArrayNodeID) Length() int {
+	return len(id.id)
 }
 
-func (id ArrayId) GetBase() byte {
-	return id.Base
+// Returns the base of id
+func (id ArrayNodeID) Base() byte {
+	return id.base
 }
 
-func (id ArrayId) GetDigit(pos int) byte {
-	return id.Id[pos]
+// Returns pos-th digit of id
+func (id ArrayNodeID) GetDigit(pos int) byte {
+	return id.id[pos]
 }
 
-func hash(addr mino.Address) (h *big.Int) {
+// Returns a hash of addr as big integer
+func hash(addr mino.Address) *big.Int {
 	sha := sha256.New()
 	sha.Write([]byte(addr.String()))
+	return byteArrayToBigInt(sha.Sum(nil))
+}
 
+// Converts an array of bytes [b0, b1, b2, ...]
+// to a big int b0 + 256 * b1 + 256 ^ 2 * b2 + ...
+func byteArrayToBigInt(bytes []byte) *big.Int {
 	totalPower := big.NewInt(1)
-	power := big.NewInt(8)
-	h = big.NewInt(0)
-	for _, value := range sha.Sum(nil) {
+	power := big.NewInt(256)
+	bigInt := big.NewInt(0)
+	for _, value := range bytes {
 		bigValue := big.NewInt(int64(value))
-		h.Add(h, bigValue.Mul(totalPower, bigValue))
+		bigInt.Add(bigInt, bigValue.Mul(totalPower, bigValue))
 		totalPower.Mul(totalPower, power)
 	}
-	return
+	return bigInt
 }
