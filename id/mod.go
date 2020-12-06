@@ -22,7 +22,9 @@ func MakeArrayId(address mino.Address, base byte, len int) Id {
 	h := hash(address)
 	bigBase := big.NewInt(int64(base))
 	bigLen := big.NewInt(int64(len))
-	h.Mod(h, bigBase.Exp(bigBase, bigLen, nil))
+	maxId := big.NewInt(0)
+	maxId = maxId.Exp(bigBase, bigLen, nil)
+	h.Mod(h, maxId)
 	curDigit := big.NewInt(0)
 	id := make([]byte, len)
 	for i := 0; i < len; i++ {
