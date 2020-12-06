@@ -136,8 +136,10 @@ func (t RoutingTable) Forward(packet router.Packet) (router.Routes, router.Voids
 
 func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
 	// TODO: check to != this
-	routingPrefix, _ := t.thisNode.PrefixUntilFirstDifferentDigit(id.NewArrayNodeID(to,
-		t.thisNode.Base(), t.thisNode.Length()))
+	toId := id.NewArrayNodeID(to, t.thisNode.Base(), t.thisNode.Length())
+	// Take the common prefix of this node and destination + first differing
+	// digit of the destination
+	routingPrefix, _ := toId.PrefixUntilFirstDifferentDigit(t.thisNode)
 	dest, ok := t.NextHop[routingPrefix]
 	if !ok {
 		// TODO: compute route
