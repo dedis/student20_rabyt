@@ -2,8 +2,8 @@ package id
 
 type Prefix interface {
 	GetLength() int
-	isPrefixOf(Id) bool
-	Append(byte) Prefix
+	isPrefixOf(id ArrayId) bool
+	Append(byte) PrefixImpl
 }
 
 // Digits of the prefix have to be stored in a string, because this structure is used as a key in the routing table map.
@@ -12,7 +12,7 @@ type PrefixImpl struct {
 	Base   byte
 }
 
-func (prefix PrefixImpl) isPrefixOf(id Id) bool {
+func (prefix PrefixImpl) isPrefixOf(id ArrayId) bool {
 	if prefix.Base != id.GetBase() {
 		return false
 	}
@@ -28,6 +28,6 @@ func (prefix PrefixImpl) GetLength() int {
 	return len(prefix.Digits)
 }
 
-func (prefix PrefixImpl) Append(digit byte) Prefix {
+func (prefix PrefixImpl) Append(digit byte) PrefixImpl {
 	return PrefixImpl{prefix.Digits + string(digit), prefix.Base}
 }

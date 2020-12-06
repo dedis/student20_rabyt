@@ -2,7 +2,6 @@ package id
 
 import (
 	"crypto/sha256"
-	"errors"
 	"go.dedis.ch/dela/mino"
 	"math/big"
 )
@@ -11,8 +10,8 @@ type Id interface {
 	GetLength() int
 	GetBase() byte
 	GetDigit(pos int) byte
-	CommonPrefix(other Id) Prefix
-	PrefixUntilFirstDifferentDigit(other Id) (Prefix, error)
+	CommonPrefix(other ArrayId) Prefix
+	PrefixUntilFirstDifferentDigit(other ArrayId) (PrefixImpl, error)
 }
 
 func BaseAndLenFromPlayers(numPlayers int) (base byte, len int) {
@@ -25,7 +24,7 @@ type ArrayId struct {
 }
 
 // Constructs an Id by taking a hash of the address modulo (base ^ len), then presenting the id as an array of digits.
-func MakeArrayId(address mino.Address, base byte, len int) Id {
+func MakeArrayId(address mino.Address, base byte, len int) ArrayId {
 	h := hash(address)
 	bigBase := big.NewInt(int64(base))
 	bigLen := big.NewInt(int64(len))
@@ -51,7 +50,7 @@ func (id ArrayId) GetDigit(pos int) byte {
 	return id.Id[pos]
 }
 
-func (id ArrayId) CommonPrefix(other Id) Prefix {
+func (id ArrayId) CommonPrefix(other ArrayId) Prefix {
 	// TODO: report an error if bases or lengths are different
 	prefix := []byte{}
 	for i := 0; i < id.GetLength(); i++ {
@@ -63,17 +62,17 @@ func (id ArrayId) CommonPrefix(other Id) Prefix {
 	return PrefixImpl{string(prefix), id.Base}
 }
 
-func (id ArrayId) PrefixUntilFirstDifferentDigit(other Id) (Prefix, error) {
-	if id.GetBase() != other.GetBase() {
-		return nil, errors.New("can't compare ids of different bases")
-	}
-	if id.GetLength() != other.GetLength() {
-		return nil, errors.New("can't compare ids of different lengths")
-	}
+func (id ArrayId) PrefixUntilFirstDifferentDigit(other ArrayId) (PrefixImpl, error) {
+	//if id.GetBase() != other.GetBase() {
+	//	return nil, errors.New("can't compare ids of different bases")
+	//}
+	//if id.GetLength() != other.GetLength() {
+	//	return nil, errors.New("can't compare ids of different lengths")
+	//}
 	commonPrefix := id.CommonPrefix(other)
-	if commonPrefix.GetLength() == id.GetLength() {
-		return nil, errors.New("ids are equal")
-	}
+	//if commonPrefix.GetLength() == id.GetLength() {
+	//	return nil, errors.New("ids are equal")
+	//}
 	return commonPrefix.Append(id.GetDigit(commonPrefix.GetLength())), nil
 }
 

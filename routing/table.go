@@ -15,8 +15,8 @@ import (
 // Players contains the addresses of other nodes that this node is aware of and is used to select an alternative next
 // hop when the connection to the one specified in NextHop fails.
 type RoutingTable struct {
-	thisNode id.Id
-	NextHop  map[id.Prefix]mino.Address
+	thisNode id.ArrayId
+	NextHop  map[id.PrefixImpl]mino.Address
 	Players  []mino.Address
 }
 
@@ -73,11 +73,11 @@ func (r Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable, erro
 
 // NewTable constructs a routing table from the addresses of participating nodes. It requires the id of the node,
 // for which the routing table is constructed, to calculate the common prefix of this node's id and other nodes' ids.
-func NewTable(addresses []mino.Address, thisId id.Id) (RoutingTable, error) {
+func NewTable(addresses []mino.Address, thisId id.ArrayId) (RoutingTable, error) {
 	// random shuffle to ensure different nodes have different entries for the same prefix
 	randomShuffle(addresses)
 
-	hopMap := make(map[id.Prefix]mino.Address)
+	hopMap := make(map[id.PrefixImpl]mino.Address)
 	for _, address := range addresses {
 		otherId := id.MakeArrayId(address, thisId.GetBase(), thisId.GetLength())
 		prefix, err := otherId.PrefixUntilFirstDifferentDigit(thisId)
