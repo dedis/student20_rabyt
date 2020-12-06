@@ -9,3 +9,5 @@ require (
 	go.dedis.ch/dela v0.0.0-20201014124135-54b9c0717601
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 )
+
+replace go.dedis.ch/dela => /home/cache-nez/epfl/dedis-semester-project/dela
