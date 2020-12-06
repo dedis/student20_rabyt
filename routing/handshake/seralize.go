@@ -1,3 +1,10 @@
+// This file defines how a handshake is serialized and deserialized.
+// * defines the handshake's format (hsFormat) and registers it in the
+//   formats registry. Thanks to this registration, this format can be
+//   retrieved in Handshake.Serialize and HandshakeFactory.Deserialize.
+// * defines the JSON message for the handshake, which is the format
+//   in-between Handshake message and serialized []byte representation.
+
 package handshake
 
 import (
