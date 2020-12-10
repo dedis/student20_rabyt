@@ -10,96 +10,91 @@ import (
 	"go.dedis.ch/dela/serde"
 )
 
-func ExampleRPC_Call() {
-	addrA := minogrpc.ParseAddress("127.0.0.1", 0)
-	mA, err := minogrpc.NewMinogrpc(addrA, NewRouter(minogrpc.NewAddressFactory()))
+func StreamN(numFollowers int, basePort uint16) {
+	orchestrator, err := minogrpc.NewMinogrpc(minogrpc.ParseAddress(
+		"127.0.0.1", basePort), NewRouter(minogrpc.NewAddressFactory()))
 	if err != nil {
-		panic("overlay A failed: " + err.Error())
+		panic("orchestrator overlay failed: " + err.Error())
 	}
+	orchestratorRPC := mino.MustCreateRPC(orchestrator, "test",
+		exampleHandler{}, exampleFactory{})
 
-	rpcA := mino.MustCreateRPC(mA, "test", exampleHandler{}, exampleFactory{})
 
-	mB, err := minogrpc.NewMinogrpc(minogrpc.ParseAddress("127.0.0.1", 0), NewRouter(minogrpc.NewAddressFactory()))
-	if err != nil {
-		panic("overlay B failed: " + err.Error())
-	}
-
-	mino.MustCreateRPC(mB, "test", exampleHandler{}, exampleFactory{})
-
-	mA.GetCertificateStore().Store(mB.GetAddress(), mB.GetCertificate())
-	mB.GetCertificateStore().Store(mA.GetAddress(), mA.GetCertificate())
-
-	addrs := mino.NewAddresses(mA.GetAddress(), mB.GetAddress())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	resps, err := rpcA.Call(ctx, exampleMessage{value: "Hello World!"}, addrs)
-	if err != nil {
-		panic("call failed: " + err.Error())
-	}
-
-	for resp := range resps {
-		reply, err := resp.GetMessageOrError()
+	players := make([]*minogrpc.Minogrpc, numFollowers + 1)
+	players[0] = orchestrator
+	addresses := make([]mino.Address, numFollowers + 1)
+	addresses[0] = orchestrator.GetAddress()
+	addrToIdx := make(map[string]int)
+	for i := 1; i <= numFollowers; i++ {
+		player, err := minogrpc.NewMinogrpc(minogrpc.ParseAddress(
+			"127.0.0.1", basePort + uint16(i)),
+			NewRouter(minogrpc.NewAddressFactory()))
 		if err != nil {
-			panic("error in reply: " + err.Error())
+			panic("overlay " + string(rune(i)) + " failed: " + err.Error())
 		}
+		players[i] = player
+		addresses[i] = player.GetAddress()
+		addrToIdx[player.GetAddress().String()] = i
+		mino.MustCreateRPC(player, "test", exampleHandler{}, exampleFactory{})
+	}
 
-		if resp.GetFrom().Equal(mA.GetAddress()) {
-			fmt.Println("A", reply.(exampleMessage).value)
-		}
-		if resp.GetFrom().Equal(mB.GetAddress()) {
-			fmt.Println("B", reply.(exampleMessage).value)
+	// set up certificates
+	for i, firstPlayer := range players {
+		for j, secondPlayer := range players {
+			if i != j {
+				firstPlayer.GetCertificateStore().Store(
+					secondPlayer.GetAddress(), secondPlayer.GetCertificate())
+			}
 		}
 	}
 
-	// Unordered output: A Hello World!
-	// B Hello World!
-}
-
-func ExampleRPC_Stream() {
-	mA, err := minogrpc.NewMinogrpc(minogrpc.ParseAddress("127.0.0.1", 20000), NewRouter(minogrpc.NewAddressFactory()))
-	if err != nil {
-		panic("overlay A failed: " + err.Error())
-	}
-
-	rpcA := mino.MustCreateRPC(mA, "test", exampleHandler{}, exampleFactory{})
-
-	mB, err := minogrpc.NewMinogrpc(minogrpc.ParseAddress("127.0.0.1", 30000), NewRouter(minogrpc.NewAddressFactory()))
-	if err != nil {
-		panic("overlay B failed: " + err.Error())
-	}
-
-	mino.MustCreateRPC(mB, "test", exampleHandler{}, exampleFactory{})
-
-	mA.GetCertificateStore().Store(mB.GetAddress(), mB.GetCertificate())
-	mB.GetCertificateStore().Store(mA.GetAddress(), mA.GetCertificate())
-
-	addrs := mino.NewAddresses(mA.GetAddress(), mB.GetAddress())
+	addrs := mino.NewAddresses(addresses...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sender, recv, err := rpcA.Stream(ctx, addrs)
+	sender, recv, err := orchestratorRPC.Stream(ctx, addrs)
 	if err != nil {
 		panic("stream failed: " + err.Error())
 	}
 
-	err = <-sender.Send(exampleMessage{value: "Hello World!"}, mB.GetAddress())
-	if err != nil {
-		panic("failed to send: " + err.Error())
+	msgFormatString := "Hello %d!"
+	for i := 1; i <= numFollowers; i++ {
+		msg := fmt.Sprintf(msgFormatString, i)
+		err = <-sender.Send(exampleMessage{value: msg}, addresses[i])
+		if err != nil {
+			errorStr := fmt.Sprintf("failed to send to %d (%s): %s",
+				i, addresses[i].String(), err.Error())
+			panic(errorStr)
+		}
 	}
 
-	from, msg, err := recv.Recv(ctx)
-	if err != nil {
-		panic("failed to receive: " + err.Error())
+	for i := 0; i < numFollowers; i++ {
+		from, msg, err := recv.Recv(ctx)
+		if err != nil {
+			panic("failed to receive: " + err.Error())
+		}
+		idx, ok := addrToIdx[from.String()]
+		if !ok {
+			panic("received a message from unexpected address: " + from.String())
+		}
+		expectedMsg := fmt.Sprintf(msgFormatString, idx)
+		receivedMsg := msg.(exampleMessage).value
+		if receivedMsg != expectedMsg {
+			panic("expected " + expectedMsg + ", received " + receivedMsg)
+		}
 	}
+	fmt.Println("Success")
+}
 
-	if from.Equal(mB.GetAddress()) {
-		fmt.Println("B", msg.(exampleMessage).value)
-	}
+func Example_stream_one() {
+	StreamN(1, 2000)
+	// Output: Success
+}
 
-	// Output: B Hello World!
+func Example_stream_several() {
+	StreamN(5, 3000)
+	// Output: Success
 }
 
 // exampleHandler is an RPC handler example.
