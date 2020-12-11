@@ -15,6 +15,7 @@ func init() {
 type HandshakeJSON struct {
 	IdBase      byte
 	IdLength    int
+	FromAddress []byte
 	ThisAddress []byte
 	Addresses   [][]byte
 }
@@ -44,10 +45,15 @@ func (hsFormat) Encode(ctx serde.Context, msg serde.Message) ([]byte, error) {
 	if err != nil {
 		return nil, xerrors.Errorf("failed to marshal address: %v", err)
 	}
+	fromAddr, err := hs.FromAddress.MarshalText()
+	if err != nil {
+		return nil, xerrors.Errorf("failed to marshal address: %v", err)
+	}
 
 	m := HandshakeJSON{
 		IdBase:      hs.IdBase,
 		IdLength:    hs.IdLength,
+		FromAddress: fromAddr,
 		ThisAddress: thisAddr,
 		Addresses:   addrs,
 	}
@@ -82,5 +88,6 @@ func (hsFormat) Decode(ctx serde.Context, data []byte) (serde.Message, error) {
 		addrs[i] = factory.FromText(raw)
 	}
 
-	return NewHandshake(m.IdBase, m.IdLength, factory.FromText(m.ThisAddress), addrs), nil
+	return NewHandshake(m.IdBase, m.IdLength, factory.FromText(m.FromAddress),
+		factory.FromText(m.ThisAddress), addrs), nil
 }

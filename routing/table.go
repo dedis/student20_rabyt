@@ -10,14 +10,15 @@ import (
 )
 
 // Prefix-based routing implementation of router.RoutingTable.
-// Each entry in the NextHop maps a prefix of this node's id (thisNode) plus
+// Each entry in the NextHop maps a prefix of this node's id (thisId) plus
 // a differing next digit to the address, where a packet whose destination has
 // this prefix should be routed.
 // Players contains the addresses of other nodes that this node is aware of and
 // is used to select an alternative next hop when the connection to the one
 // specified in NextHop fails.
 type RoutingTable struct {
-	thisNode id.ArrayNodeID
+	thisNode mino.Address
+	thisId   id.ArrayNodeID
 	NextHop  map[id.StringPrefix]mino.Address
 	Players  []mino.Address
 }
@@ -63,7 +64,8 @@ func (r Router) New(players mino.Players, thisAddress mino.Address) (
 	}
 
 	base, length := id.BaseAndLenFromPlayers(len(addrs))
-	return NewTable(addrs, id.NewArrayNodeID(thisAddress, base, length))
+	return NewTable(addrs, thisAddress,
+		id.NewArrayNodeID(thisAddress, base, length))
 }
 
 // GenerateTableFrom implements router.Router. It selects entries for the
@@ -72,14 +74,14 @@ func (r Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 	error) {
 	hs := h.(handshake.Handshake)
 	thisId := id.NewArrayNodeID(hs.ThisAddress, hs.IdBase, hs.IdLength)
-	return NewTable(hs.Addresses, thisId)
+	return NewTable(hs.Addresses, hs.ThisAddress, thisId)
 }
 
 // NewTable constructs a routing table from the addresses of participating nodes.
 // It requires the id of the node, for which the routing table is constructed,
 // to calculate the common prefix of this node's id and other nodes' ids.
-func NewTable(addresses []mino.Address, thisId id.ArrayNodeID) (RoutingTable,
-	error) {
+func NewTable(addresses []mino.Address, thisAddr mino.Address,
+	thisId id.ArrayNodeID) (RoutingTable, error) {
 	// random shuffle ensures that different nodes have different entries for
 	// the same prefix
 	randomShuffle(addresses, thisId)
@@ -88,7 +90,7 @@ func NewTable(addresses []mino.Address, thisId id.ArrayNodeID) (RoutingTable,
 	for _, address := range addresses {
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
 		if thisId.Equal(otherId) {
-			continue;
+			continue
 		}
 		prefix, err := otherId.PrefixUntilFirstDifferentDigit(thisId)
 		if err != nil {
@@ -100,15 +102,16 @@ func NewTable(addresses []mino.Address, thisId id.ArrayNodeID) (RoutingTable,
 		}
 	}
 
-	return RoutingTable{thisId, hopMap, addresses}, nil
+	return RoutingTable{thisAddr,thisId, hopMap,
+		addresses}, nil
 }
 
 func randomShuffle(addresses []mino.Address, thisId id.ArrayNodeID) {
 	b, _ := id.BaseAndLenFromPlayers(len(addresses))
 	base := int64(b)
 	rand.Seed(int64(thisId.GetDigit(0)) +
-		int64(thisId.GetDigit(1)) * base +
-		int64(thisId.GetDigit(2)) * base * base);
+		int64(thisId.GetDigit(1))*base +
+		int64(thisId.GetDigit(2))*base*base)
 	rand.Shuffle(len(addresses), func(i, j int) {
 		addresses[i], addresses[j] = addresses[j], addresses[i]
 	})
@@ -126,7 +129,7 @@ func (t RoutingTable) Make(src mino.Address, to []mino.Address,
 func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 	base, length := id.BaseAndLenFromPlayers(len(t.Players))
 	return handshake.Handshake{IdBase: base, IdLength: length,
-		ThisAddress: to, Addresses: t.Players}
+		FromAddress: t.thisNode, ThisAddress: to, Addresses: t.Players}
 }
 
 // Forward implements router.RoutingTable. It splits the packet into multiple,
@@ -158,10 +161,10 @@ func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 // given destination.
 func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
 	// TODO: check to != this
-	toId := id.NewArrayNodeID(to, t.thisNode.Base(), t.thisNode.Length())
+	toId := id.NewArrayNodeID(to, t.thisId.Base(), t.thisId.Length())
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
-	routingPrefix, _ := toId.PrefixUntilFirstDifferentDigit(t.thisNode)
+	routingPrefix, _ := toId.PrefixUntilFirstDifferentDigit(t.thisId)
 	dest, ok := t.NextHop[routingPrefix]
 	if !ok {
 		// TODO: compute route

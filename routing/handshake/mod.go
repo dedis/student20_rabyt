@@ -14,6 +14,7 @@ import (
 type Handshake struct {
 	IdBase      byte
 	IdLength    int
+	FromAddress mino.Address
 	ThisAddress mino.Address
 	Addresses   []mino.Address
 }
@@ -26,11 +27,12 @@ func RegisterHandshakeFormat(f serde.Format, e serde.FormatEngine) {
 }
 
 // Creates a handshake from the arguments
-func NewHandshake(idBase uint8, idLength int, thisAddress mino.Address,
-	addresses []mino.Address) Handshake {
+func NewHandshake(idBase uint8, idLength int, fromAddress mino.Address,
+	thisAddress mino.Address, addresses []mino.Address) Handshake {
 	return Handshake{
 		IdBase:      idBase,
 		IdLength:    idLength,
+		FromAddress: fromAddress,
 		ThisAddress: thisAddress,
 		Addresses:   addresses,
 	}
