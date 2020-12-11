@@ -59,13 +59,14 @@ func (id ArrayNodeID) GetDigit(pos int) byte {
 func (id ArrayNodeID) CommonPrefix(other ArrayNodeID) Prefix {
 	// TODO: report an error if bases or lengths are different
 	prefix := []byte{}
+	var offset byte = 65
 	for i := 0; i < id.Length(); i++ {
 		if id.GetDigit(i) != other.GetDigit(i) {
 			break
 		}
-		prefix = id.id[0:i]
+		prefix = append(prefix, id.GetDigit(i) + offset)
 	}
-	return StringPrefix{string(prefix), id.Base()}
+	return StringPrefix{string(prefix), id.Base(), offset}
 }
 
 func (id ArrayNodeID) PrefixUntilFirstDifferentDigit(other ArrayNodeID) (StringPrefix,
