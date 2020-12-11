@@ -7,7 +7,6 @@ import (
 	"go.dedis.ch/dela/mino/router"
 	"go.dedis.ch/dela/mino/router/tree/types"
 	"math/rand"
-	"time"
 )
 
 // Prefix-based routing implementation of router.RoutingTable.
@@ -83,7 +82,7 @@ func NewTable(addresses []mino.Address, thisId id.ArrayNodeID) (RoutingTable,
 	error) {
 	// random shuffle ensures that different nodes have different entries for
 	// the same prefix
-	randomShuffle(addresses)
+	randomShuffle(addresses, thisId)
 
 	hopMap := make(map[id.StringPrefix]mino.Address)
 	for _, address := range addresses {
@@ -101,8 +100,12 @@ func NewTable(addresses []mino.Address, thisId id.ArrayNodeID) (RoutingTable,
 	return RoutingTable{thisId, hopMap, addresses}, nil
 }
 
-func randomShuffle(addresses []mino.Address) {
-	rand.Seed(time.Now().UnixNano())
+func randomShuffle(addresses []mino.Address, thisId id.ArrayNodeID) {
+	b, _ := id.BaseAndLenFromPlayers(len(addresses))
+	base := int64(b)
+	rand.Seed(int64(thisId.GetDigit(0)) +
+		int64(thisId.GetDigit(1)) * base +
+		int64(thisId.GetDigit(2)) * base * base);
 	rand.Shuffle(len(addresses), func(i, j int) {
 		addresses[i], addresses[j] = addresses[j], addresses[i]
 	})
