@@ -7,4 +7,4 @@ require (
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 )
 
-replace go.dedis.ch/dela => /home/cache-nez/epfl/dedis-semester-project/dela
+replace go.dedis.ch/dela => /Users/narula/dev/dela
