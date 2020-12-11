@@ -84,6 +84,18 @@ func (id ArrayNodeID) PrefixUntilFirstDifferentDigit(other ArrayNodeID) (StringP
 	return commonPrefix.Append(id.GetDigit(commonPrefix.Length())), nil
 }
 
+func (id ArrayNodeID) Equal(other ArrayNodeID) bool {
+	if id.base != other.base || id.Length() != other.Length() {
+		return false;
+	}
+	for i := 0; i < id.Length(); i++ {
+		if id.GetDigit(i) != other.GetDigit(i) {
+			return false;
+		}
+	}
+	return true;
+}
+
 // Returns a hash of addr as big integer
 func hash(addr mino.Address) *big.Int {
 	sha := sha256.New()

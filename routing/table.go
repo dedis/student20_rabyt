@@ -87,6 +87,9 @@ func NewTable(addresses []mino.Address, thisId id.ArrayNodeID) (RoutingTable,
 	hopMap := make(map[id.StringPrefix]mino.Address)
 	for _, address := range addresses {
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
+		if thisId.Equal(otherId) {
+			continue;
+		}
 		prefix, err := otherId.PrefixUntilFirstDifferentDigit(thisId)
 		if err != nil {
 			// TODO: can only happen if thisId == otherId, check
