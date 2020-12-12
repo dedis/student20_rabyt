@@ -149,6 +149,8 @@ func (s streamAction) Execute(req node.Context) error {
 		done := make(chan struct{})
 		go func() {
 			tick := time.Tick(3 * time.Second)
+			cnt := 0
+			msgs := 0
 			for {
 				select {
 				case <-done:
@@ -156,14 +158,21 @@ func (s streamAction) Execute(req node.Context) error {
 					quit <- struct{}{}
 					return
 				case <-tick:
+					cnt += 1
+					if cnt == 100 || msgs == len(addrs) {
+						return
+					}
 					ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
 					dela.Logger.Info().Msg("Receiving messages from stream...")
+					// Can I distinguish "no messages in the stream" and a
+					// genuine error?
 					from, reply, err := receiver.Recv(ctx)
 					if err != nil {
 						dela.Logger.Error().Msgf("error receiving message: %v", err)
 						continue
 					}
 					dela.Logger.Info().Msgf("`%s` says `%s`", from, reply)
+					msgs += 1
 				}
 			}
 		}()
