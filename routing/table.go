@@ -3,6 +3,7 @@ package routing
 import (
 	"github.com/dedis/student20_rabyt/id"
 	"github.com/dedis/student20_rabyt/routing/handshake"
+	"go.dedis.ch/dela"
 	"go.dedis.ch/dela/mino"
 	"go.dedis.ch/dela/mino/router"
 	"go.dedis.ch/dela/mino/router/tree/types"
@@ -73,6 +74,8 @@ func (r Router) New(players mino.Players, thisAddress mino.Address) (
 func (r Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 	error) {
 	hs := h.(handshake.Handshake)
+	dela.Logger.Info().Msgf("%s received a handshake from %s",
+		hs.ThisAddress.String(), hs.FromAddress.String())
 	thisId := id.NewArrayNodeID(hs.ThisAddress, hs.IdBase, hs.IdLength)
 	return NewTable(hs.Addresses, hs.ThisAddress, thisId)
 }
@@ -87,6 +90,7 @@ func NewTable(addresses []mino.Address, thisAddr mino.Address,
 	randomShuffle(addresses, thisId)
 
 	hopMap := make(map[id.StringPrefix]mino.Address)
+	dela.Logger.Trace().Msgf("%s built a routing table: ", thisAddr.String())
 	for _, address := range addresses {
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
 		if thisId.Equal(otherId) {
@@ -99,6 +103,10 @@ func NewTable(addresses []mino.Address, thisAddr mino.Address,
 		}
 		if _, contains := hopMap[prefix]; !contains {
 			hopMap[prefix] = address
+			dela.Logger.Trace().Msgf("%s -> %s (%s)", prefix.Digits,
+				address.String(),
+				// converting an id to prefix
+				otherId.CommonPrefix(otherId).Digits)
 		}
 	}
 
@@ -136,6 +144,9 @@ func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 // based on the calculated next hops.
 func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 	router.Voids) {
+	dela.Logger.Trace().Msgf("%s: routing a message from %s to %s",
+		t.thisNode.String(), packet.GetSource().String(),
+		packet.GetDestination())
 	routes := make(router.Routes)
 	voids := make(router.Voids)
 
@@ -169,6 +180,8 @@ func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
 	if !ok {
 		// TODO: compute route
 	}
+	dela.Logger.Info().Msgf("%s: next hop for message to %s is %s",
+		t.thisNode.String(), to.String(), dest)
 	return dest
 }
 
@@ -177,5 +190,7 @@ func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
 func (t RoutingTable) OnFailure(to mino.Address) error {
 	// TODO: keep redundancy in the routing table, use the alternative hop
 	// and mark this node as unreachable
+	dela.Logger.Info().Msgf("%s failed to route the message to %s",
+		t.thisNode.String(), to.String())
 	return nil
 }

@@ -56,7 +56,7 @@ func (id ArrayNodeID) GetDigit(pos int) byte {
 	return id.id[pos]
 }
 
-func (id ArrayNodeID) CommonPrefix(other ArrayNodeID) Prefix {
+func (id ArrayNodeID) CommonPrefix(other ArrayNodeID) StringPrefix {
 	// TODO: report an error if bases or lengths are different
 	prefix := []byte{}
 	var offset byte = 65
