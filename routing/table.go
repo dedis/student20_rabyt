@@ -26,37 +26,39 @@ type RoutingTable struct {
 
 // Implements router.Router
 type Router struct {
-	packetFac router.PacketFactory
-	hsFac     router.HandshakeFactory
+	packetFac    router.PacketFactory
+	hsFac        router.HandshakeFactory
+	routingTable router.RoutingTable
 }
 
 // NewRouter returns a new router.
-func NewRouter(f mino.AddressFactory) Router {
+func NewRouter(f mino.AddressFactory) *Router {
 	fac := types.NewPacketFactory(f)
 	hsFac := handshake.NewHandshakeFactory(f)
 	r := Router{
-		packetFac: fac,
-		hsFac:     hsFac,
+		packetFac:    fac,
+		hsFac:        hsFac,
+		routingTable: nil,
 	}
 
-	return r
+	return &r
 }
 
 // GetPacketFactory implements router.Router. It returns the packet factory.
-func (r Router) GetPacketFactory() router.PacketFactory {
+func (r *Router) GetPacketFactory() router.PacketFactory {
 	return r.packetFac
 }
 
 // GetHandshakeFactory implements router.Router. It returns the handshake
 // factory.
-func (r Router) GetHandshakeFactory() router.HandshakeFactory {
+func (r *Router) GetHandshakeFactory() router.HandshakeFactory {
 	return r.hsFac
 }
 
 // New implements router.Router. It decides on the base and length of node
 // ids based on the number of players and creates the routing table for the node
 // that is booting the protocol.
-func (r Router) New(players mino.Players, thisAddress mino.Address) (
+func (r *Router) New(players mino.Players, thisAddress mino.Address) (
 	router.RoutingTable, error) {
 	addrs := make([]mino.Address, 0, players.Len())
 	iter := players.AddressIterator()
@@ -65,19 +67,31 @@ func (r Router) New(players mino.Players, thisAddress mino.Address) (
 	}
 
 	base, length := id.BaseAndLenFromPlayers(len(addrs))
-	return NewTable(addrs, thisAddress,
+	table, err := NewTable(addrs, thisAddress,
 		id.NewArrayNodeID(thisAddress, base, length))
+	if err != nil {
+		return nil, err
+	}
+	r.routingTable = table
+	return r.routingTable, nil
 }
 
 // GenerateTableFrom implements router.Router. It selects entries for the
 // routing table from the addresses, received in the handshake.
-func (r Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
+func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 	error) {
 	hs := h.(handshake.Handshake)
 	dela.Logger.Info().Msgf("%s received a handshake from %s",
 		hs.ThisAddress.String(), hs.FromAddress.String())
-	thisId := id.NewArrayNodeID(hs.ThisAddress, hs.IdBase, hs.IdLength)
-	return NewTable(hs.Addresses, hs.ThisAddress, thisId)
+	if r.routingTable == nil {
+		thisId := id.NewArrayNodeID(hs.ThisAddress, hs.IdBase, hs.IdLength)
+		table, err := NewTable(hs.Addresses, hs.ThisAddress, thisId)
+		if err != nil {
+			return nil, err
+		}
+		r.routingTable = table
+	}
+	return r.routingTable, nil
 }
 
 // NewTable constructs a routing table from the addresses of participating nodes.
@@ -110,7 +124,7 @@ func NewTable(addresses []mino.Address, thisAddr mino.Address,
 		}
 	}
 
-	return RoutingTable{thisAddr,thisId, hopMap,
+	return RoutingTable{thisAddr, thisId, hopMap,
 		addresses}, nil
 }
 
