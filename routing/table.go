@@ -112,7 +112,8 @@ func NewTable(addresses []mino.Address, thisAddr mino.Address,
 	randomShuffle(addresses, thisId)
 
 	hopMap := make(map[id.StringPrefix]mino.Address)
-	dela.Logger.Trace().Msgf("%s built a routing table: ", thisAddr.String())
+	dela.Logger.Trace().Msgf("%s (%s) built a routing table: ",
+		thisAddr.String(), thisId.CommonPrefix(thisId).Digits)
 	for _, address := range addresses {
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
 		if thisId.Equal(otherId) {
@@ -166,8 +167,9 @@ func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 // based on the calculated next hops.
 func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 	router.Voids) {
-	dela.Logger.Trace().Msgf("%s: routing a message from %s to %s",
-		t.thisNode.String(), packet.GetSource().String(),
+	dela.Logger.Trace().Msgf("%s: routing a message from %s (%s) to %s",
+		t.thisNode.String(), t.thisId.CommonPrefix(t.thisId).Digits,
+		packet.GetSource().String(),
 		packet.GetDestination())
 	routes := make(router.Routes)
 	voids := make(router.Voids)
@@ -202,8 +204,8 @@ func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
 	if !ok {
 		// TODO: compute route
 	}
-	dela.Logger.Info().Msgf("%s: next hop for message to %s is %s",
-		t.thisNode.String(), to.String(), dest)
+	dela.Logger.Info().Msgf("%s: next hop for message to %s (id %s) is %s",
+		t.thisNode.String(), to.String(), toId.CommonPrefix(toId).Digits, dest)
 	return dest
 }
 
