@@ -153,6 +153,8 @@ go.dedis.ch/dela v0.0.0-20201014124135-54b9c0717601 h1:Z0WdgUazVq6GcMVEdJYncj4nb
 go.dedis.ch/dela v0.0.0-20201014124135-54b9c0717601/go.mod h1:+w5b+7B964aJfliU03ehT0FnEeU8wgWCW+s5HGYfErg=
 go.dedis.ch/dela v0.0.0-20201217112440-cfc46e5624bc h1:/zH99hV71bfVCq2Sklk8VfRyeNdGfjwoBA+rfZz1fGs=
 go.dedis.ch/dela v0.0.0-20201217112440-cfc46e5624bc/go.mod h1:+w5b+7B964aJfliU03ehT0FnEeU8wgWCW+s5HGYfErg=
+go.dedis.ch/dela v0.0.0-20201217104423-748e8f7e7e47 h1:HTAlGhflemDvEhCqek0Y6wD98gZdFh79bsS8oW1Il68=
+go.dedis.ch/dela v0.0.0-20201217104423-748e8f7e7e47/go.mod h1:+w5b+7B964aJfliU03ehT0FnEeU8wgWCW+s5HGYfErg=
 go.dedis.ch/fixbuf v1.0.3 h1:hGcV9Cd/znUxlusJ64eAlExS+5cJDIyTyEG+otu5wQs=
 go.dedis.ch/fixbuf v1.0.3/go.mod h1:yzJMt34Wa5xD37V5RTdmp38cz3QhMagdGoem9anUalw=
 go.dedis.ch/kyber/v3 v3.0.4/go.mod h1:OzvaEnPvKlyrWyp3kGXlFdp7ap1VC6RkZDTaPikqhsQ=

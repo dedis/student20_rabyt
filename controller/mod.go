@@ -260,18 +260,21 @@ func (exampleHandler) Stream(sender mino.Sender, recv mino.Receiver) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	from, msg, err := recv.Recv(ctx)
-	if err != nil {
-		return err
-	}
+	for {
+		from, msg, err := recv.Recv(ctx)
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 
-	dela.Logger.Info().Msgf("in mino.Handler, got %s from %s", msg, from.String())
-	err = <-sender.Send(msg, from)
-	if err != nil {
-		return err
+		dela.Logger.Info().Msgf("in mino.Handler, got %s from %s", msg, from.String())
+		err = <-sender.Send(msg, from)
+		if err != nil {
+			return err
+		}
 	}
-
-	return nil
 }
 
 // exampleMessage is an example of a message.
