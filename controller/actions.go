@@ -10,15 +10,15 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"sort"
+	"strings"
+	"time"
+
 	"go.dedis.ch/dela"
 	"go.dedis.ch/dela/cli/node"
 	"go.dedis.ch/dela/mino"
 	"go.dedis.ch/dela/mino/minogrpc"
 	"golang.org/x/xerrors"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 // CertAction is an action to list the certificates known by the server.
@@ -106,78 +106,100 @@ func (a joinAction) Execute(req node.Context) error {
 	return nil
 }
 
-type streamAction struct{}
+type senderReceiver struct {
+	sender mino.Sender
+	receiver mino.Receiver
+	addresses []mino.Address
+}
+
+type streamAction struct{
+	addrsToSenderRecevier map[string]senderReceiver
+}
 
 func (s streamAction) Execute(req node.Context) error {
 	addrs := req.Flags.StringSlice("addresses")
-	dela.Logger.Info().Msgf("addrs: %v", addrs)
+	sort.Strings(addrs)
+	addrsStr := strings.Join(addrs, "|")
 
-	var o *minogrpc.Minogrpc
-	err := req.Injector.Resolve(&o)
-	if err != nil {
-		return xerrors.Errorf("couldn't resolve: %v", err)
-	}
+	var sender mino.Sender
+	var receiver mino.Receiver
+	var addresses []mino.Address
 
-	addresses := make([]mino.Address, len(addrs)+1)
-	addresses[0] = o.GetAddress()
-	addressFactory := o.GetAddressFactory()
-	for i := 0; i < len(addrs); i++ {
-		addresses[i+1] = addressFactory.FromText([]byte(addrs[i]))
-		dela.Logger.Info().Msgf("addresses[%d]=%s", i+1, addresses[i+1].String())
-	}
-	var rpc mino.RPC
-	err = req.Injector.Resolve(&rpc)
-	if err != nil {
-		return xerrors.Errorf("couldn't resolve: %v", err)
-	}
+	if sr, ok := s.addrsToSenderRecevier[addrsStr]; !ok {
+		var o *minogrpc.Minogrpc
+		err := req.Injector.Resolve(&o)
+		if err != nil {
+			return xerrors.Errorf("couldn't resolve: %v", err)
+		}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	sender, receiver, err := rpc.Stream(ctx, mino.NewAddresses(addresses...))
-	if err != nil {
-		return xerrors.Errorf("error creating stream: %v", err)
+		addresses = make([]mino.Address, len(addrs)+1)
+		addresses[0] = o.GetAddress()
+		addressFactory := o.GetAddressFactory()
+		for i := 0; i < len(addrs); i++ {
+			addresses[i+1] = addressFactory.FromText([]byte(addrs[i]))
+			dela.Logger.Info().Msgf("addresses[%d]=%s", i+1, addresses[i+1].String())
+		}
+		var rpc mino.RPC
+		err = req.Injector.Resolve(&rpc)
+		if err != nil {
+			return xerrors.Errorf("couldn't resolve: %v", err)
+		}
+
+		sender, receiver, err = rpc.Stream(context.Background(), mino.NewAddresses(addresses...))
+		if err != nil {
+			return xerrors.Errorf("error creating stream: %v", err)
+		}
+		s.addrsToSenderRecevier[addrsStr] = senderReceiver{
+			sender: sender,
+			receiver: receiver,
+			addresses: addresses,
+		}
+	} else {
+		dela.Logger.Info().Msg("Using cached sender and receiver")
+		sender, receiver, addresses = sr.sender, sr.receiver, sr.addresses
 	}
 
 	msg := req.Flags.String("message")
-	err = <-sender.Send(exampleMessage{value: msg}, addresses[1:]...)
+	dela.Logger.Info().Msgf("sending %s to %v", msg, addresses)
+	err := <-sender.Send(exampleMessage{value: msg}, addresses[1:]...)
 	if err != nil {
 		return xerrors.Errorf("error sending message: %v", err)
 	}
 
 	quit := make(chan struct{})
-	done := func(quit chan struct{}) chan struct{} {
-		done := make(chan struct{})
+	func(quit chan struct{}) {
 		go func() {
-			tick := time.Tick(3 * time.Second)
+			tick := time.Tick(100 * time.Millisecond)
+			counter := 0
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 			for {
 				select {
-				case <-done:
-					dela.Logger.Info().Msg("closing receiver")
+				case <-ctx.Done():
+					dela.Logger.Info().Msg("closing receiver, timed out waiting for all responses")
 					quit <- struct{}{}
 					return
 				case <-tick:
-					ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
 					dela.Logger.Info().Msg("Receiving messages from stream...")
-					from, reply, err := receiver.Recv(ctx)
+					childCtx , cancelFn := context.WithTimeout(ctx, 95 * time.Millisecond)
+					from, reply, err := receiver.Recv(childCtx)
 					if err != nil {
 						dela.Logger.Error().Msgf("error receiving message: %v", err)
 						continue
 					}
 					dela.Logger.Info().Msgf("`%s` says `%s`", from, reply)
+					counter++
+					// Exit after receiving enough messages
+					if counter == len(addresses)-1 {
+						quit <- struct{}{}
+						return
+					}
+					cancelFn()
 				}
 			}
 		}()
-		return done
 	}(quit)
 
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	<-signalChan
-	dela.Logger.Info().Msg("received ctrl+c")
-	done <- struct{}{}
-	dela.Logger.Info().Msg("sent kill to goroutine")
 	<-quit
-	dela.Logger.Info().Msg("killed goroutine")
 	return nil
 }
