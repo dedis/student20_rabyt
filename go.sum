@@ -148,8 +148,8 @@ github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/
 github.com/urfave/cli/v2 v2.2.0 h1:JTTnM6wKzdA0Jqodd966MVj4vWbbquZykeX1sKbe2C4=
 github.com/urfave/cli/v2 v2.2.0/go.mod h1:SE9GqnLQmjVa0iPEY0f1w3ygNIYcIJ0OKPMoW2caLfQ=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
-go.dedis.ch/dela v0.0.0-20201217112440-cfc46e5624bc h1:/zH99hV71bfVCq2Sklk8VfRyeNdGfjwoBA+rfZz1fGs=
-go.dedis.ch/dela v0.0.0-20201217112440-cfc46e5624bc/go.mod h1:+w5b+7B964aJfliU03ehT0FnEeU8wgWCW+s5HGYfErg=
+go.dedis.ch/dela v0.0.0-20201217104423-748e8f7e7e47 h1:HTAlGhflemDvEhCqek0Y6wD98gZdFh79bsS8oW1Il68=
+go.dedis.ch/dela v0.0.0-20201217104423-748e8f7e7e47/go.mod h1:+w5b+7B964aJfliU03ehT0FnEeU8wgWCW+s5HGYfErg=
 go.dedis.ch/fixbuf v1.0.3 h1:hGcV9Cd/znUxlusJ64eAlExS+5cJDIyTyEG+otu5wQs=
 go.dedis.ch/fixbuf v1.0.3/go.mod h1:yzJMt34Wa5xD37V5RTdmp38cz3QhMagdGoem9anUalw=
 go.dedis.ch/kyber/v3 v3.0.4/go.mod h1:OzvaEnPvKlyrWyp3kGXlFdp7ap1VC6RkZDTaPikqhsQ=
