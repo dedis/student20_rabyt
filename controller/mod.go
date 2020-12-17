@@ -14,11 +14,14 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"go.dedis.ch/dela/serde"
 	"io"
 	"math"
+	"net"
+	"os"
 	"path/filepath"
 	"time"
+
+	"go.dedis.ch/dela/serde"
 
 	"go.dedis.ch/dela"
 	"go.dedis.ch/dela/cli"
@@ -115,7 +118,7 @@ func (m miniController) SetCommands(builder node.Builder) {
 			Required: true,
 		},
 	)
-	sub.SetAction(builder.MakeAction(streamAction{}))
+	sub.SetAction(builder.MakeAction(streamAction{addrsToSenderRecevier: make(map[string]senderReceiver)}))
 }
 
 // OnStart implements node.Initializer. It starts the minogrpc instance and
@@ -130,10 +133,14 @@ func (m miniController) OnStart(ctx cli.Flags, inj node.Injector) error {
 	// TODO: replace with your router
 	rter := tree.NewRouter(minogrpc.NewAddressFactory())
 
-	addr := minogrpc.ParseAddress("127.0.0.1", uint16(port))
+	myIP, err := findIP()
+	if err != nil {
+		return xerrors.Errorf("error finding ip: %v", err)
+	}
+	addr := minogrpc.ParseAddress(myIP, uint16(port))
 
 	var db kv.DB
-	err := inj.Resolve(&db)
+	err = inj.Resolve(&db)
 	if err != nil {
 		return xerrors.Errorf("injector: %v", err)
 	}
@@ -290,4 +297,19 @@ type exampleFactory struct{}
 // the inner value.
 func (exampleFactory) Deserialize(ctx serde.Context, data []byte) (serde.Message, error) {
 	return exampleMessage{value: string(data)}, nil
+}
+
+func findIP() (string, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", err
+	}
+
+	addrs, err := net.LookupHost(hostname)
+	if err != nil {
+		return "", err
+	}
+
+	dela.Logger.Info().Msgf("addrs: %v", addrs)
+	return addrs[0], nil
 }
