@@ -62,8 +62,16 @@ func (r *Router) New(players mino.Players, thisAddress mino.Address) (
 	router.RoutingTable, error) {
 	addrs := make([]mino.Address, 0, players.Len())
 	iter := players.AddressIterator()
+	includedThis := false
 	for iter.HasNext() {
-		addrs = append(addrs, iter.GetNext())
+		currentAddr := iter.GetNext()
+		if currentAddr.Equal(thisAddress) {
+			includedThis = true
+		}
+		addrs = append(addrs, currentAddr)
+	}
+	if !includedThis {
+		addrs = append(addrs, thisAddress)
 	}
 
 	base, length := id.BaseAndLenFromPlayers(len(addrs))
