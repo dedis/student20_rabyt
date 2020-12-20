@@ -57,7 +57,15 @@ func hash(addr mino.Address) *big.Int {
 	if err != nil {
 		marshalled = []byte(addr.String())
 	}
-	sha.Write(marshalled)
+	// A hack to accommodate for minogrpc's design:
+	// 1) the first byte is used to indicate if a node is orchestrator or not
+	// 2) the only way to reach the orchestrator is to route a message to nil
+	//    from its server side, which has the same address but orchestrator byte
+	//    set to f.
+	// We therefore have to ignore if a node is the orchestrator to be able to
+	// route the message first to its server side, then from the server side to
+	// the client side.
+	sha.Write(marshalled[1:])
 	return byteArrayToBigInt(sha.Sum(nil))
 }
 
