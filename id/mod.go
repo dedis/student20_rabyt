@@ -3,6 +3,7 @@ package id
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"go.dedis.ch/dela/mino"
 	"math/big"
 )
@@ -12,6 +13,8 @@ type NodeID interface {
 	Base() byte
 	GetDigit(pos int) byte
 	Equals(other NodeID) bool
+	CommonPrefix(other NodeID) (Prefix, error)
+	CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, error)
 }
 
 type ArrayNodeID struct {
@@ -67,6 +70,34 @@ func (id ArrayNodeID) Equals(other NodeID) bool {
 		}
 		return true
 	}
+}
+
+func (id ArrayNodeID) CommonPrefix(other NodeID) (Prefix, error) {
+	if id.Base() != other.Base() {
+		return nil, errors.New("can't compare ids of different bases")
+	}
+	if id.Length() != other.Length() {
+		return nil, errors.New("can't compare ids of different lengths")
+	}
+	prefix := []byte{}
+	for i := 0; i < id.Length(); i++ {
+		if id.GetDigit(i) != other.GetDigit(i) {
+			break
+		}
+		prefix = id.id[0:i+1]
+	}
+	return StringPrefix{string(prefix), id.Base()}, nil
+}
+
+func (id ArrayNodeID) CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, error) {
+	commonPrefix, err := id.CommonPrefix(other)
+	if err != nil {
+		return nil, err
+	}
+	if commonPrefix.Length() == id.Length() {
+		return nil, errors.New("ids are equal")
+	}
+	return commonPrefix.Append(id.GetDigit(commonPrefix.Length())), nil
 }
 
 // Returns a hash of addr as big integer
