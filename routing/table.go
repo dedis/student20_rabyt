@@ -178,8 +178,14 @@ func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 // GetRoute implements router.RoutingTable. It calculates the next hop for a
 // given destination.
 func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
-	// TODO: check to != this
 	toId := id.NewArrayNodeID(to, t.thisNode.Base(), t.thisNode.Length())
+	// Since id collisions are not expected, the only way this can happen is
+	// if this node is orchestrator's server side and the message is routed to
+	// orchestrator's client side. The only way the message can reach it is if
+	// it is routed to nil.
+	if toId.Equals(t.thisNode) && !to.Equal(t.thisAddress) {
+		return nil
+	}
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
 	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
