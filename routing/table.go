@@ -18,9 +18,10 @@ import (
 // is used to select an alternative next hop when the connection to the one
 // specified in NextHop fails.
 type RoutingTable struct {
-	thisNode id.NodeID
-	NextHop  map[id.Prefix]mino.Address
-	Players  []mino.Address
+	thisNode    id.NodeID
+	thisAddress mino.Address
+	NextHop     map[id.Prefix]mino.Address
+	Players     []mino.Address
 }
 
 // Implements router.Router
@@ -75,7 +76,8 @@ func (r *Router) New(players mino.Players, thisAddress mino.Address) (
 	}
 
 	base, length := id.BaseAndLenFromPlayers(len(addrs))
-	table, err := NewTable(addrs, id.NewArrayNodeID(thisAddress, base, length))
+	table, err := NewTable(addrs, id.NewArrayNodeID(thisAddress, base,
+		length), thisAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +92,7 @@ func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 	hs := h.(handshake.Handshake)
 	if r.routingTable == nil {
 		thisId := id.NewArrayNodeID(hs.ThisAddress, hs.IdBase, hs.IdLength)
-		table, err := NewTable(hs.Addresses, thisId)
+		table, err := NewTable(hs.Addresses, thisId, hs.ThisAddress)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +104,8 @@ func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 // NewTable constructs a routing table from the addresses of participating nodes.
 // It requires the id of the node, for which the routing table is constructed,
 // to calculate the common prefix of this node's id and other nodes' ids.
-func NewTable(addresses []mino.Address, thisId id.NodeID) (RoutingTable,
+func NewTable(addresses []mino.Address, thisId id.NodeID,
+	thisAddress mino.Address) (RoutingTable,
 	error) {
 	// random shuffle ensures that different nodes have different entries for
 	// the same prefix
@@ -121,7 +124,7 @@ func NewTable(addresses []mino.Address, thisId id.NodeID) (RoutingTable,
 		}
 	}
 
-	return RoutingTable{thisId, hopMap, addresses}, nil
+	return RoutingTable{thisId, thisAddress, hopMap, addresses}, nil
 }
 
 func randomShuffle(addresses []mino.Address) {
