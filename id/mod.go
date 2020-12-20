@@ -53,7 +53,11 @@ func (id ArrayNodeID) GetDigit(pos int) byte {
 // Returns a hash of addr as big integer
 func hash(addr mino.Address) *big.Int {
 	sha := sha256.New()
-	sha.Write([]byte(addr.String()))
+	marshalled, err := addr.MarshalText()
+	if err != nil {
+		marshalled = []byte(addr.String())
+	}
+	sha.Write(marshalled)
 	return byteArrayToBigInt(sha.Sum(nil))
 }
 
