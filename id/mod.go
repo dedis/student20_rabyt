@@ -1,6 +1,7 @@
 package id
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"go.dedis.ch/dela/mino"
 	"math/big"
@@ -10,6 +11,7 @@ type NodeID interface {
 	Length() int
 	Base() byte
 	GetDigit(pos int) byte
+	Equals(other NodeID) bool
 }
 
 type ArrayNodeID struct {
@@ -48,6 +50,23 @@ func (id ArrayNodeID) Base() byte {
 // Returns pos-th digit of id
 func (id ArrayNodeID) GetDigit(pos int) byte {
 	return id.id[pos]
+}
+
+func (id ArrayNodeID) Equals(other NodeID) bool {
+	if id.Base() != other.Base() || id.Length() != other.Length() {
+		return false
+	}
+	switch otherId := other.(type) {
+	case ArrayNodeID:
+		return bytes.Equal(id.id, otherId.id)
+	default:
+		for i := 0; i < id.Length(); i++ {
+			if id.GetDigit(i) != other.GetDigit(i) {
+				return false
+			}
+		}
+		return true
+	}
 }
 
 // Returns a hash of addr as big integer
