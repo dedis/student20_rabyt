@@ -2,8 +2,8 @@ package id
 
 type Prefix interface {
 	Length() int
-	IsPrefixOf(id ArrayNodeID) bool
 	Append(byte) StringPrefix
+	IsPrefixOf(id ArrayNodeID) bool
 }
 
 // Digits of the prefix have to be stored in a string, because this structure

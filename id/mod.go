@@ -1,7 +1,9 @@
 package id
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"errors"
 	"go.dedis.ch/dela/mino"
 	"math/big"
 )
@@ -10,11 +12,14 @@ type NodeID interface {
 	Length() int
 	Base() byte
 	GetDigit(pos int) byte
-	CommonPrefix(other ArrayNodeID) StringPrefix
-	PrefixUntilFirstDifferentDigit(other ArrayNodeID) (StringPrefix, error)
+	Equals(other ArrayNodeID) bool
+	AsPrefix() StringPrefix
+	CommonPrefix(other ArrayNodeID) (StringPrefix, error)
+	CommonPrefixAndFirstDifferentDigit(other ArrayNodeID) (StringPrefix, error)
 }
 
-func BaseAndLenFromPlayers(numPlayers int) (base byte, len int) {
+// TODO: calculate these parameters from the number of players
+func BaseAndLenFromPlayers(numPlayers int) (byte, int) {
 	return 16, 3
 }
 
@@ -56,8 +61,29 @@ func (id ArrayNodeID) GetDigit(pos int) byte {
 	return id.id[pos]
 }
 
-func (id ArrayNodeID) CommonPrefix(other ArrayNodeID) StringPrefix {
-	// TODO: report an error if bases or lengths are different
+func (id ArrayNodeID) Equals(other ArrayNodeID) bool {
+	if id.Base() != other.Base() || id.Length() != other.Length() {
+		return false
+	}
+
+	return id.base == other.base && id.Length() ==
+		other.Length() && bytes.Equal(id.id, other.id)
+}
+
+func (id ArrayNodeID) AsPrefix() StringPrefix {
+	prefix, _ := id.CommonPrefix(id)
+	return prefix
+}
+
+func (id ArrayNodeID) CommonPrefix(other ArrayNodeID) (StringPrefix, error) {
+	if id.Base() != other.Base() {
+		return StringPrefix{"", 0, 0},
+		errors.New("can't compare ids of different bases")
+	}
+	if id.Length() != other.Length() {
+		return StringPrefix{"", 0, 0},
+		errors.New("can't compare ids of different lengths")
+	}
 	prefix := []byte{}
 	var offset byte = 65
 	for i := 0; i < id.Length(); i++ {
@@ -66,40 +92,37 @@ func (id ArrayNodeID) CommonPrefix(other ArrayNodeID) StringPrefix {
 		}
 		prefix = append(prefix, id.GetDigit(i) + offset)
 	}
-	return StringPrefix{string(prefix), id.Base(), offset}
+	return StringPrefix{string(prefix), id.Base(), offset}, nil
 }
 
-func (id ArrayNodeID) PrefixUntilFirstDifferentDigit(other ArrayNodeID) (StringPrefix,
+func (id ArrayNodeID) CommonPrefixAndFirstDifferentDigit(other ArrayNodeID) (StringPrefix,
 	error) {
-	//if id.GetBase() != other.GetBase() {
-	//	return nil, errors.New("can't compare ids of different bases")
-	//}
-	//if id.GetLength() != other.GetLength() {
-	//	return nil, errors.New("can't compare ids of different lengths")
-	//}
-	commonPrefix := id.CommonPrefix(other)
-	//if commonPrefix.GetLength() == id.GetLength() {
-	//	return nil, errors.New("ids are equal")
-	//}
+	commonPrefix, err := id.CommonPrefix(other)
+	if err != nil {
+		return commonPrefix, err
+	}
+	if commonPrefix.Length() == id.Length() {
+		return commonPrefix, errors.New("ids are equal")
+	}
 	return commonPrefix.Append(id.GetDigit(commonPrefix.Length())), nil
-}
-
-func (id ArrayNodeID) Equal(other ArrayNodeID) bool {
-	if id.base != other.base || id.Length() != other.Length() {
-		return false;
-	}
-	for i := 0; i < id.Length(); i++ {
-		if id.GetDigit(i) != other.GetDigit(i) {
-			return false;
-		}
-	}
-	return true;
 }
 
 // Returns a hash of addr as big integer
 func hash(addr mino.Address) *big.Int {
 	sha := sha256.New()
-	sha.Write([]byte(addr.String()))
+	marshalled, err := addr.MarshalText()
+	if err != nil {
+		marshalled = []byte(addr.String())
+	}
+	// A hack to accommodate for minogrpc's design:
+	// 1) the first byte is used to indicate if a node is orchestrator or not
+	// 2) the only way to reach the orchestrator is to route a message to nil
+	//    from its server side, which has the same address but orchestrator byte
+	//    set to f.
+	// We therefore have to ignore if a node is the orchestrator to be able to
+	// route the message first to its server side, then from the server side to
+	// the client side.
+	sha.Write(marshalled[1:])
 	return byteArrayToBigInt(sha.Sum(nil))
 }
 

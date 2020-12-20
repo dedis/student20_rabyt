@@ -18,10 +18,10 @@ import (
 // is used to select an alternative next hop when the connection to the one
 // specified in NextHop fails.
 type RoutingTable struct {
-	thisNode mino.Address
-	thisId   id.ArrayNodeID
-	NextHop  map[id.StringPrefix]mino.Address
-	Players  []mino.Address
+	thisId      id.ArrayNodeID
+	thisAddress mino.Address
+	NextHop     map[id.StringPrefix]mino.Address
+	Players     []mino.Address
 }
 
 // Implements router.Router
@@ -35,6 +35,7 @@ type Router struct {
 func NewRouter(f mino.AddressFactory) *Router {
 	fac := types.NewPacketFactory(f)
 	hsFac := handshake.NewHandshakeFactory(f)
+
 	r := Router{
 		packetFac:    fac,
 		hsFac:        hsFac,
@@ -65,7 +66,7 @@ func (r *Router) New(players mino.Players, thisAddress mino.Address) (
 	includedThis := false
 	for iter.HasNext() {
 		currentAddr := iter.GetNext()
-		if currentAddr == thisAddress {
+		if currentAddr.Equal(thisAddress) {
 			includedThis = true
 		}
 		addrs = append(addrs, currentAddr)
@@ -75,8 +76,8 @@ func (r *Router) New(players mino.Players, thisAddress mino.Address) (
 	}
 
 	base, length := id.BaseAndLenFromPlayers(len(addrs))
-	table, err := NewTable(addrs, thisAddress,
-		id.NewArrayNodeID(thisAddress, base, length))
+	table, err := NewTable(addrs, id.NewArrayNodeID(thisAddress, base, length),
+		thisAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +94,7 @@ func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 		hs.ThisAddress.String(), hs.FromAddress.String())
 	if r.routingTable == nil {
 		thisId := id.NewArrayNodeID(hs.ThisAddress, hs.IdBase, hs.IdLength)
-		table, err := NewTable(hs.Addresses, hs.ThisAddress, thisId)
+		table, err := NewTable(hs.Addresses, thisId, hs.ThisAddress)
 		if err != nil {
 			return nil, err
 		}
@@ -105,21 +106,21 @@ func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 // NewTable constructs a routing table from the addresses of participating nodes.
 // It requires the id of the node, for which the routing table is constructed,
 // to calculate the common prefix of this node's id and other nodes' ids.
-func NewTable(addresses []mino.Address, thisAddr mino.Address,
-	thisId id.ArrayNodeID) (RoutingTable, error) {
+func NewTable(addresses []mino.Address, thisId id.ArrayNodeID,
+thisAddress mino.Address) (RoutingTable, error) {
 	// random shuffle ensures that different nodes have different entries for
 	// the same prefix
 	randomShuffle(addresses, thisId)
 
 	hopMap := make(map[id.StringPrefix]mino.Address)
 	dela.Logger.Trace().Msgf("%s (%s) built a routing table: ",
-		thisAddr.String(), thisId.CommonPrefix(thisId).Digits)
+		thisAddress.String(), thisId.AsPrefix().Digits)
 	for _, address := range addresses {
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
-		if thisId.Equal(otherId) {
+		if thisId.Equals(otherId) {
 			continue
 		}
-		prefix, err := otherId.PrefixUntilFirstDifferentDigit(thisId)
+		prefix, err := otherId.CommonPrefixAndFirstDifferentDigit(thisId)
 		if err != nil {
 			// TODO: can only happen if thisId == otherId, check
 			continue
@@ -127,13 +128,11 @@ func NewTable(addresses []mino.Address, thisAddr mino.Address,
 		if _, contains := hopMap[prefix]; !contains {
 			hopMap[prefix] = address
 			dela.Logger.Trace().Msgf("%s -> %s (%s)", prefix.Digits,
-				address.String(),
-				// converting an id to prefix
-				otherId.CommonPrefix(otherId).Digits)
+				address.String(), otherId.AsPrefix().Digits)
 		}
 	}
 
-	return RoutingTable{thisAddr, thisId, hopMap,
+	return RoutingTable{thisId, thisAddress, hopMap,
 		addresses}, nil
 }
 
@@ -143,12 +142,10 @@ func randomShuffle(addresses []mino.Address, thisId id.ArrayNodeID) {
 	rand.Seed(int64(thisId.GetDigit(0)) +
 		int64(thisId.GetDigit(1))*base +
 		int64(thisId.GetDigit(2))*base*base)
-	rand.Shuffle(len(addresses), func(i, j int) {
-		addresses[i], addresses[j] = addresses[j], addresses[i]
-	})
 }
 
 // Make implements router.RoutingTable. It creates a packet with the source
+// address, the destination addresses and the payload.
 func (t RoutingTable) Make(src mino.Address, to []mino.Address,
 	msg []byte) router.Packet {
 	return types.NewPacket(src, msg, to...)
@@ -160,7 +157,7 @@ func (t RoutingTable) Make(src mino.Address, to []mino.Address,
 func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 	base, length := id.BaseAndLenFromPlayers(len(t.Players))
 	return handshake.Handshake{IdBase: base, IdLength: length,
-		FromAddress: t.thisNode, ThisAddress: to, Addresses: t.Players}
+		FromAddress: t.thisAddress, ThisAddress: to, Addresses: t.Players}
 }
 
 // Forward implements router.RoutingTable. It splits the packet into multiple,
@@ -168,9 +165,8 @@ func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 	router.Voids) {
 	dela.Logger.Trace().Msgf("%s: routing a message from %s (%s) to %s",
-		t.thisNode.String(), t.thisId.CommonPrefix(t.thisId).Digits,
-		packet.GetSource().String(),
-		packet.GetDestination())
+		t.thisAddress.String(), t.thisId.AsPrefix().Digits,
+		packet.GetSource().String(), packet.GetDestination())
 	routes := make(router.Routes)
 	voids := make(router.Voids)
 
@@ -195,17 +191,23 @@ func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 // GetRoute implements router.RoutingTable. It calculates the next hop for a
 // given destination.
 func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
-	// TODO: check to != this
 	toId := id.NewArrayNodeID(to, t.thisId.Base(), t.thisId.Length())
+	// Since id collisions are not expected, the only way this can happen is
+	// if this node is orchestrator's server side and the message is routed to
+	// orchestrator's client side. The only way the message can reach it is if
+	// it is routed to nil.
+	if toId.Equals(t.thisId) && !to.Equal(t.thisAddress) {
+		return nil
+	}
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
-	routingPrefix, _ := toId.PrefixUntilFirstDifferentDigit(t.thisId)
+	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisId)
 	dest, ok := t.NextHop[routingPrefix]
 	if !ok {
 		// TODO: compute route
 	}
 	dela.Logger.Info().Msgf("%s: next hop for message to %s (id %s) is %s",
-		t.thisNode.String(), to.String(), toId.CommonPrefix(toId).Digits, dest)
+		t.thisAddress.String(), to.String(), toId.AsPrefix().Digits, dest)
 	return dest
 }
 
@@ -215,6 +217,6 @@ func (t RoutingTable) OnFailure(to mino.Address) error {
 	// TODO: keep redundancy in the routing table, use the alternative hop
 	// and mark this node as unreachable
 	dela.Logger.Info().Msgf("%s failed to route the message to %s",
-		t.thisNode.String(), to.String())
+		t.thisAddress.String(), to.String())
 	return nil
 }
