@@ -10,3 +10,5 @@ require (
 	go.dedis.ch/simnet v0.3.10
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 )
+
+replace go.dedis.ch/dela => /home/cache-nez/epfl/dedis-semester-project/dela
