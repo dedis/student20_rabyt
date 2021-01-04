@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"go.dedis.ch/simnet/sim/docker"
 	"io"
 	"os"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
-	"go.dedis.ch/simnet/sim/docker"
 	"golang.org/x/xerrors"
 )
 
@@ -97,7 +97,8 @@ func main() {
 		sim.WithTopology(
 			network.NewSimpleTopology(10, 20*time.Millisecond),
 		),
-		sim.WithImage("gnarula/rabyt", nil, nil, sim.NewTCP(2000)),
+		sim.WithImage("katjag/dela-tree-simulation", nil, nil,
+			sim.NewTCP(2000)),
 		// Example of a mount of type tmpfs.
 		sim.WithTmpFS("/storage", 256*sim.MB),
 		// Example of requesting a minimum amount of resources.
