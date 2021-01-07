@@ -160,7 +160,7 @@ func (s streamAction) Execute(req node.Context) error {
 	}
 
 	msg := req.Flags.String("message")
-	dela.Logger.Info().Msgf("sending %s to %v", msg, addresses)
+	dela.Logger.Info().Msgf("sending %s to %v", msg, addresses[1:])
 	err := <-sender.Send(exampleMessage{value: msg}, addresses[1:]...)
 	if err != nil {
 		return xerrors.Errorf("error sending message: %v", err)
@@ -180,14 +180,14 @@ func (s streamAction) Execute(req node.Context) error {
 					quit <- struct{}{}
 					return
 				case <-tick:
-					dela.Logger.Info().Msg("Receiving messages from stream...")
 					childCtx , cancelFn := context.WithTimeout(ctx, 95 * time.Millisecond)
 					from, reply, err := receiver.Recv(childCtx)
 					if err != nil {
 						dela.Logger.Error().Msgf("error receiving message: %v", err)
 						continue
 					}
-					dela.Logger.Info().Msgf("`%s` says `%s`", from, reply)
+					dela.Logger.Info().Msgf("%s got %s from %s",
+						addresses[0], reply, from)
 					counter++
 					// Exit after receiving enough messages
 					if counter == len(addresses)-1 {

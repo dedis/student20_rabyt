@@ -271,7 +271,8 @@ func (h exampleHandler) Stream(sender mino.Sender, recv mino.Receiver) error {
 			return err
 		}
 
-		dela.Logger.Info().Msgf("in mino.Handler, got %s from %s", msg, from.String())
+		dela.Logger.Info().Msgf("%s got %s from %s", h.thisAddress, msg,
+			from.String())
 		reply := fmt.Sprintf("%s's reply to %s", h.thisAddress,
 			msg.(exampleMessage).value)
 		err = <-sender.Send(exampleMessage{reply}, from)
