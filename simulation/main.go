@@ -54,7 +54,7 @@ func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	for i := 1; i < len(nodes); i++ {
 		cmd = append(cmd, []string{"--addresses", fmt.Sprintf("F%s:2000", nodes[i].Address)}...)
 	}
-	cmd = append(cmd, []string{"--message", "Hello"}...)
+	cmd = append(cmd, []string{"--message", "SetupMessage"}...)
 	err = simio.Exec(nodes[0].Name, cmd, sim.ExecOptions{
 		Stdout: writer,
 		Stderr: writer,
@@ -74,7 +74,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	for i := 1; i < len(nodes); i++ {
 		cmd = append(cmd, []string{"--addresses", fmt.Sprintf("F%s:2000", nodes[i].Address)}...)
 	}
-	cmd = append(cmd, []string{"--message", "Hello"}...)
+	cmd = append(cmd, []string{"--message", "TrueMessage"}...)
 
 	err := simio.Exec(nodes[0].Name, cmd, sim.ExecOptions{
 		Stdout: writer,
