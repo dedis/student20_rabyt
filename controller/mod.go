@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.dedis.ch/dela/serde"
@@ -256,6 +257,81 @@ func (exampleHandler) Process(req mino.Request) (serde.Message, error) {
 	return req.Message, nil
 }
 
+// Message format ([part] -- optional part):
+// msg#[Wait][NoReply][ReplyAll:addr1,addr2,...]
+// Only one of NoReply and ReplyAll can be specified. The default behaviour is
+// replying the sender
+const (
+	WaitCommand = "Wait"
+	NoReplyCommand = "NoReply"
+	ReplyAllCommand = "ReplyAll:"
+	TextCommandSeparator = "#"
+	AddressSeparator = ","
+)
+
+func appendError(acc error, current error) error {
+	if current == nil {
+		return acc
+	}
+	if acc == nil {
+		return current
+	}
+
+	return fmt.Errorf("%s, %s", acc.Error(), current.Error())
+}
+
+func (h exampleHandler) replyMultiple(msgFormat string, addrs string,
+	sender mino.Sender) error {
+	var err error = nil
+	for _, addr := range strings.Split(addrs, AddressSeparator) {
+		reply := fmt.Sprintf(msgFormat, addr)
+		currErr := <-sender.Send(exampleMessage{reply}, session.NewAddress(addr))
+
+		// combine the errors instead of returning on the first error
+		err = appendError(err, currErr)
+	}
+	return err
+}
+
+func (h exampleHandler) processMessage(from mino.Address, msg serde.Message,
+	sender mino.Sender) error {
+
+	commandText := msg.(exampleMessage).value
+	parts := strings.Split(commandText, TextCommandSeparator)
+	text := parts[0]
+	command := ""
+	if len(parts) > 1 {
+		command = parts[1]
+	}
+
+	if strings.Contains(command, NoReplyCommand) {
+		return nil
+	}
+
+	// Wait for the simulation to disconnect some links
+	if strings.Contains(command, WaitCommand) {
+		time.Sleep(5 * time.Second)
+	}
+
+	var err error = nil
+	// the message to all participants has to include NoReply
+	// to avoid infinite message exchange
+	replyFormat := fmt.Sprintf(
+		"%s's reply to %s for ", h.thisAddress, text) + "%s" +
+		TextCommandSeparator + NoReplyCommand
+	if strings.Contains(command, ReplyAllCommand) {
+		addrStart := strings.Index(command, ReplyAllCommand) +
+			len(ReplyAllCommand)
+		err = h.replyMultiple(replyFormat, command[addrStart:], sender)
+	}
+
+	// Reply the sender (the sender either includes NoReply or is the
+	// orchestrator, not included in the address list in ReplyAll)
+	reply := fmt.Sprintf(replyFormat, from)
+	currErr := <-sender.Send(exampleMessage{reply}, from)
+	return appendError(err, currErr)
+}
+
 // Stream implements mino.Handler. It returns the message to the sender.
 func (h exampleHandler) Stream(sender mino.Sender, recv mino.Receiver) error {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -272,9 +348,7 @@ func (h exampleHandler) Stream(sender mino.Sender, recv mino.Receiver) error {
 
 		dela.Logger.Info().Msgf("%s got %s from %s", h.thisAddress, msg,
 			from.String())
-		reply := fmt.Sprintf("%s's reply to %s", h.thisAddress,
-			msg.(exampleMessage).value)
-		err = <-sender.Send(exampleMessage{reply}, from)
+		err = h.processMessage(from, msg, sender)
 		if err != nil {
 			return err
 		}
