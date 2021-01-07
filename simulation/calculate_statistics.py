@@ -98,8 +98,10 @@ class BroadcastMessage:
 
 node_address_re = re.compile(r'mino\[([0-9:.]*)\] is running')
 relay_re = re.compile(r'relay opened addr=([0-9:.]*) to=([0-9:.]*)')
-receive_re = re.compile(r'got \{(.*)} from [Orchestrator:]*([0-9:.]*)')
-hop_re = re.compile(r'Forwarding \{(.*)\}, previous hop: ([0-9:.]*), source: ([Orchestrator0-9:.]*), destination: \[(.*)\]')
+# in the message: match everything before '#' as the message content, since
+# the part after is commands
+receive_re = re.compile(r'got \{([^#]*).*} from [Orchestrator:]*([0-9:.]*)')
+hop_re = re.compile(r'Forwarding \{([^#]*).*\}, previous hop: ([0-9:.]*), source: ([Orchestrator0-9:.]*), destination: \[(.*)\]')
 ORCHESTRATOR_PREFIX = 'Orchestrator:'
 
 
