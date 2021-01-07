@@ -92,30 +92,39 @@ func (s simRound) After(simio sim.IO, nodes []sim.NodeInfo) error {
 	return nil
 }
 
-func main() {
-	options := []sim.Option{
+func createSimOptions(numNodes int, dockerImage string) []sim.Option {
+	return []sim.Option{
 		sim.WithTopology(
-			network.NewSimpleTopology(10, 20*time.Millisecond),
+			network.NewSimpleTopology(numNodes, 20*time.Millisecond),
 		),
-		sim.WithImage("katjag/dela-tree-simulation", nil, nil,
+		sim.WithImage(dockerImage, nil, nil,
 			sim.NewTCP(2000)),
-		// Example of a mount of type tmpfs.
-		sim.WithTmpFS("/storage", 256*sim.MB),
-		// Example of requesting a minimum amount of resources.
-		//kubernetes.WithResources("20m", "64Mi"),
 	}
+}
+
+const (
+	TreeRoutingImage   = "katjag/dela-tree-simulation"
+	PrefixRoutingImage = "katjag/prefix-routing-simulation"
+)
+
+func runSimulation(numNodes int, dockerImage string) error {
+	options := createSimOptions(numNodes, dockerImage)
 
 	//kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-
 	//engine, err := kubernetes.NewStrategy(kubeconfig, options...)
 	engine, err := docker.NewStrategy(options...)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	sim := simnet.NewSimulation(simRound{}, engine)
+	simulation := simnet.NewSimulation(simRound{}, engine)
 
-	err = sim.Run(os.Args)
+	err = simulation.Run(os.Args)
+	return err
+}
+
+func main() {
+	err := runSimulation(10, PrefixRoutingImage)
 	if err != nil {
 		panic(err)
 	}
