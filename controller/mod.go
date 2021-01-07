@@ -15,6 +15,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"github.com/dedis/student20_rabyt/routing"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -163,7 +164,7 @@ func (m miniController) OnStart(ctx cli.Flags, inj node.Injector) error {
 
 	inj.Inject(o)
 
-	rpc := mino.MustCreateRPC(o, "test", exampleHandler{}, exampleFactory{})
+	rpc := mino.MustCreateRPC(o, "test", exampleHandler{o.GetAddress()}, exampleFactory{})
 
 	inj.Inject(rpc)
 
@@ -247,7 +248,7 @@ func (g generator) Generate() ([]byte, error) {
 //
 // - implements mino.Handler
 type exampleHandler struct {
-	mino.UnsupportedHandler
+	thisAddress mino.Address
 }
 
 // Process implements mino.Handler. It returns the message received.
@@ -256,7 +257,7 @@ func (exampleHandler) Process(req mino.Request) (serde.Message, error) {
 }
 
 // Stream implements mino.Handler. It returns the message to the sender.
-func (exampleHandler) Stream(sender mino.Sender, recv mino.Receiver) error {
+func (h exampleHandler) Stream(sender mino.Sender, recv mino.Receiver) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -270,7 +271,9 @@ func (exampleHandler) Stream(sender mino.Sender, recv mino.Receiver) error {
 		}
 
 		dela.Logger.Info().Msgf("in mino.Handler, got %s from %s", msg, from.String())
-		err = <-sender.Send(msg, from)
+		reply := fmt.Sprintf("%s's reply to %s", h.thisAddress,
+			msg.(exampleMessage).value)
+		err = <-sender.Send(exampleMessage{reply}, from)
 		if err != nil {
 			return err
 		}
