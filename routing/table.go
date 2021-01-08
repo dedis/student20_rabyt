@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"fmt"
 	"github.com/dedis/student20_rabyt/id"
 	"github.com/dedis/student20_rabyt/routing/handshake"
 	"go.dedis.ch/dela/mino"
@@ -105,19 +106,25 @@ func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 // It requires the id of the node, for which the routing table is constructed,
 // to calculate the common prefix of this node's id and other nodes' ids.
 func NewTable(addresses []mino.Address, thisId id.NodeID,
-	thisAddress mino.Address) (RoutingTable,
-	error) {
+	thisAddress mino.Address) (router.RoutingTable, error) {
 	// random shuffle ensures that different nodes have different entries for
 	// the same prefix
 	randomShuffle(addresses)
 
 	hopMap := make(map[id.Prefix]mino.Address)
 	for _, address := range addresses {
+		if address.Equal(thisAddress) {
+			continue
+		}
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
+		if otherId.Equals(thisId) {
+			return nil, fmt.Errorf("id collision: id %s for addresses %s" +
+				" and %s", thisId, thisAddress.String(), address.String())
+		}
 		prefix, err := otherId.CommonPrefixAndFirstDifferentDigit(thisId)
 		if err != nil {
-			// TODO: can only happen if thisId == otherId, check
-			continue
+			return nil, fmt.Errorf("error when calculating common prefix of" +
+				" ids: %s", err.Error())
 		}
 		if _, contains := hopMap[prefix]; !contains {
 			hopMap[prefix] = address
@@ -158,7 +165,6 @@ func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 	voids := make(router.Voids)
 
 	for _, dest := range packet.GetDestination() {
-		// TODO: can GetRoute ever return an error? What case that would be?
 		gateway := t.GetRoute(dest)
 		p, ok := routes[gateway]
 		// A packet for this next hop hasn't been created yet,
@@ -189,11 +195,7 @@ func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
 	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
-	dest, ok := t.NextHop[routingPrefix]
-	if !ok {
-		// TODO: compute route
-	}
-	return dest
+	return t.NextHop[routingPrefix]
 }
 
 // OnFailure implements router.RoutingTable. It changes the next hop for a
