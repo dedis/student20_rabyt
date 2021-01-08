@@ -1,3 +1,5 @@
+// Package handshake provides implementation for router.Handshake
+// as well as serialization/deserialization and HandshakeFactory.
 // This file defines how a handshake is serialized and deserialized.
 // * defines the handshake's format (hsFormat) and registers it in the
 //   formats registry. Thanks to this registration, this format can be
@@ -26,7 +28,7 @@ type HandshakeJSON struct {
 	Addresses   [][]byte
 }
 
-// HandshakeFormat is the format engine to encode and decode handshake messages.
+// hsFormat is the format engine to encode and decode handshake messages.
 // Implements serde.FormatEngine
 type hsFormat struct{}
 
