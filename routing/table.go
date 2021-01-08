@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Prefix-based routing implementation of router.RoutingTable.
+// RoutingTable is a prefix-based routing implementation of router.RoutingTable.
 // Each entry in the NextHop maps a prefix of this node's id (thisNode) plus
 // a differing next digit to the address, where a packet whose destination has
 // this prefix should be routed.
@@ -25,7 +25,7 @@ type RoutingTable struct {
 	Players     []mino.Address
 }
 
-// Implements router.Router
+// Router implements router.Router
 type Router struct {
 	packetFac    router.PacketFactory
 	hsFac        router.HandshakeFactory
@@ -57,7 +57,7 @@ func (r *Router) GetHandshakeFactory() router.HandshakeFactory {
 	return r.hsFac
 }
 
-// New implements router.Router. It decides on the base and length of node
+// New implements router.Router. It determines the base and length of node
 // ids based on the number of players and creates the routing table for the node
 // that is booting the protocol.
 func (r *Router) New(players mino.Players, thisAddress mino.Address) (
