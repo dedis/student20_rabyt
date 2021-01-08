@@ -3,15 +3,16 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"go.dedis.ch/simnet/sim/kubernetes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"go.dedis.ch/simnet"
 	"go.dedis.ch/simnet/network"
 	"go.dedis.ch/simnet/sim"
-	"go.dedis.ch/simnet/sim/docker"
 	"golang.org/x/xerrors"
 )
 
@@ -99,6 +100,7 @@ func createSimOptions(numNodes int, dockerImage string) []sim.Option {
 		),
 		sim.WithImage(dockerImage, nil, nil,
 			sim.NewTCP(2000)),
+		kubernetes.WithResources("20m", "64Mi"),
 	}
 }
 
@@ -110,9 +112,8 @@ const (
 func runSimulation(numNodes int, dockerImage string) error {
 	options := createSimOptions(numNodes, dockerImage)
 
-	//kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-	//engine, err := kubernetes.NewStrategy(kubeconfig, options...)
-	engine, err := docker.NewStrategy(options...)
+	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	engine, err := kubernetes.NewStrategy(kubeconfig, options...)
 	if err != nil {
 		return err
 	}
