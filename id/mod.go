@@ -27,8 +27,8 @@ type ArrayNodeID struct {
 	base byte
 }
 
-// Constructs a NodeID by taking a hash of the address modulo (base ^ len),
-// then presenting the id as an array of digits.
+// NewArrayNodeID constructs a NodeID by taking a hash of the address modulo
+// (base ^ len), then presenting the id as an array of digits.
 func NewArrayNodeID(address mino.Address, base byte, len int) ArrayNodeID {
 	h := hash(address)
 	bigBase := big.NewInt(int64(base))
@@ -45,21 +45,22 @@ func NewArrayNodeID(address mino.Address, base byte, len int) ArrayNodeID {
 	return ArrayNodeID{id, base}
 }
 
-// Returns the length of id
+// Length returns the length of id
 func (id ArrayNodeID) Length() int {
 	return len(id.id)
 }
 
-// Returns the base of id
+// Base returns the base of id
 func (id ArrayNodeID) Base() byte {
 	return id.base
 }
 
-// Returns pos-th digit of id
+// GetDigit returns pos-th digit of id
 func (id ArrayNodeID) GetDigit(pos int) byte {
 	return id.id[pos]
 }
 
+// Equals tests if the id is equal to other
 func (id ArrayNodeID) Equals(other NodeID) bool {
 	if id.Base() != other.Base() || id.Length() != other.Length() {
 		return false
@@ -77,6 +78,8 @@ func (id ArrayNodeID) Equals(other NodeID) bool {
 	}
 }
 
+// CommonPrefix calculates a common prefix of two ids. Returns an error if
+// bases or lengths of the ids are different.
 func (id ArrayNodeID) CommonPrefix(other NodeID) (Prefix, error) {
 	if id.Base() != other.Base() {
 		return nil, errors.New("can't compare ids of different bases")
@@ -94,6 +97,10 @@ func (id ArrayNodeID) CommonPrefix(other NodeID) (Prefix, error) {
 	return StringPrefix{string(prefix), id.Base()}, nil
 }
 
+// CommonPrefixAndFirstDifferentDigit returns the common prefix of the two ids
+// and the first digit of this id that is different from corresponding other's
+// digit. Returns an error if bases or lengths of the ids are different, or if
+// ids are equal.
 func (id ArrayNodeID) CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, error) {
 	commonPrefix, err := id.CommonPrefix(other)
 	if err != nil {
@@ -105,7 +112,7 @@ func (id ArrayNodeID) CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, 
 	return commonPrefix.Append(id.GetDigit(commonPrefix.Length())), nil
 }
 
-// Returns a hash of addr as big integer
+// hash returns a hash of addr as big integer
 func hash(addr mino.Address) *big.Int {
 	sha := sha256.New()
 	marshalled, err := addr.MarshalText()
@@ -124,7 +131,7 @@ func hash(addr mino.Address) *big.Int {
 	return byteArrayToBigInt(sha.Sum(nil))
 }
 
-// Converts an array of bytes [b0, b1, b2, ...]
+// byteArrayToBigInt converts an array of bytes [b0, b1, b2, ...]
 // to a big int b0 + 256 * b1 + 256 ^ 2 * b2 + ...
 func byteArrayToBigInt(bytes []byte) *big.Int {
 	totalPower := big.NewInt(1)

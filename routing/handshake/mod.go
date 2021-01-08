@@ -9,8 +9,8 @@ import (
 	"golang.org/x/xerrors"
 )
 
-// Implements router.Handshake. The node, receiving the handshake, constructs
-// a routing table based on this information (primarily Addresses).
+// Handshake implements router.Handshake. The node, receiving the handshake,
+// constructs a routing table based on this information (primarily Addresses).
 type Handshake struct {
 	IdBase      byte
 	IdLength    int
@@ -25,7 +25,7 @@ func RegisterHandshakeFormat(f serde.Format, e serde.FormatEngine) {
 	hsFormats.Register(f, e)
 }
 
-// Creates a handshake from the arguments
+// NewHandshake creates a handshake from the arguments
 func NewHandshake(idBase uint8, idLength int, thisAddress mino.Address,
 	addresses []mino.Address) Handshake {
 	return Handshake{
@@ -36,7 +36,7 @@ func NewHandshake(idBase uint8, idLength int, thisAddress mino.Address,
 	}
 }
 
-// Serializes the handshake by encoding it as HandshakeJSON
+// Serialize encodes the handshake as HandshakeJSON
 func (h Handshake) Serialize(ctx serde.Context) ([]byte, error) {
 	format := hsFormats.Get(ctx.GetFormat())
 
@@ -48,7 +48,7 @@ func (h Handshake) Serialize(ctx serde.Context) ([]byte, error) {
 	return data, nil
 }
 
-// Implements router.HandshakeFactory
+// HandshakeFactory implements router.HandshakeFactory
 type HandshakeFactory struct {
 	addrFac mino.AddressFactory
 }
