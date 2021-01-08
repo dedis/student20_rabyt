@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"errors"
 	"fmt"
 	"github.com/dedis/student20_rabyt/id"
 	"github.com/dedis/student20_rabyt/routing/handshake"
@@ -22,6 +23,8 @@ type RoutingTable struct {
 	thisNode    id.NodeID
 	thisAddress mino.Address
 	NextHop     map[id.Prefix]mino.Address
+	// map from the prefix representation of address to the address
+	FailedHops	map[id.Prefix]mino.Address
 	Players     []mino.Address
 }
 
@@ -131,7 +134,8 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 		}
 	}
 
-	return RoutingTable{thisId, thisAddress, hopMap, addresses}, nil
+	return &RoutingTable{thisId, thisAddress, hopMap,
+		make(map[id.Prefix]mino.Address), addresses}, nil
 }
 
 func randomShuffle(addresses []mino.Address) {
@@ -143,7 +147,7 @@ func randomShuffle(addresses []mino.Address) {
 
 // Make implements router.RoutingTable. It creates a packet with the source
 // address, the destination addresses and the payload.
-func (t RoutingTable) Make(src mino.Address, to []mino.Address,
+func (t *RoutingTable) Make(src mino.Address, to []mino.Address,
 	msg []byte) router.Packet {
 	return types.NewPacket(src, msg, to...)
 }
@@ -151,7 +155,7 @@ func (t RoutingTable) Make(src mino.Address, to []mino.Address,
 // PrepareHandshakeFor implements router.RoutingTable. It creates a handshake
 // that should be sent to the distant peer when opening a relay to it.
 // The peer will then generate its own routing table based on the handshake.
-func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
+func (t *RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 	base, length := id.BaseAndLenFromPlayers(len(t.Players))
 	return handshake.Handshake{IdBase: base, IdLength: length,
 		ThisAddress: to, Addresses: t.Players}
@@ -159,13 +163,18 @@ func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 
 // Forward implements router.RoutingTable. It splits the packet into multiple,
 // based on the calculated next hops.
-func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
+func (t *RoutingTable) Forward(packet router.Packet) (router.Routes,
 	router.Voids) {
 	routes := make(router.Routes)
 	voids := make(router.Voids)
 
 	for _, dest := range packet.GetDestination() {
-		gateway := t.GetRoute(dest)
+		gateway, err := t.GetRoute(dest)
+		if err != nil {
+			voids[dest] = router.Void{Error: err}
+			continue
+		}
+
 		p, ok := routes[gateway]
 		// A packet for this next hop hasn't been created yet,
 		// create it and add to routes
@@ -187,25 +196,58 @@ func (t *RoutingTable) addrToId(addr mino.Address) id.NodeID {
 
 // GetRoute implements router.RoutingTable. It calculates the next hop for a
 // given destination.
-func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
+func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 	toId := t.addrToId(to)
 	// Since id collisions are not expected, the only way this can happen is
 	// if this node is orchestrator's server side and the message is routed to
 	// orchestrator's client side. The only way the message can reach it is if
 	// it is routed to nil.
 	if toId.Equals(t.thisNode) && !to.Equal(t.thisAddress) {
-		return nil
+		return nil, nil
 	}
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
 	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
-	return t.NextHop[routingPrefix]
+	nextHop, ok := t.NextHop[routingPrefix]
+	if !ok {
+		return nil, errors.New("No route to " + to.String())
+	}
+	return nextHop, nil
+}
+
+func (t *RoutingTable) closerToDestination(hop id.NodeID, dest id.NodeID) bool {
+	thisPrefix, _ := dest.CommonPrefix(t.thisNode)
+	hopPrefix, _ := dest.CommonPrefix(hop)
+	if hopPrefix.Length() == thisPrefix.Length() {
+		thisInt := t.thisNode.AsBigInt()
+		hopInt := hop.AsBigInt()
+		destInt := dest.AsBigInt()
+		// |dest - hop| < |dest - this|, i.e. hop is numerically closer
+		// to destination
+		return hopInt.Sub(hopInt, destInt).Cmp(
+			thisInt.Sub(thisInt, destInt)) < 0
+	}
+	return hopPrefix.Length() > thisPrefix.Length()
 }
 
 // OnFailure implements router.RoutingTable. It changes the next hop for a
 // given destination because the provided next hop is not available.
-func (t RoutingTable) OnFailure(to mino.Address) error {
-	// TODO: keep redundancy in the routing table, use the alternative hop
-	// and mark this node as unreachable
+func (t *RoutingTable) OnFailure(dest mino.Address) error {
+	toId := t.addrToId(dest)
+	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
+	failedEntry := t.NextHop[routingPrefix]
+	t.FailedHops[t.addrToId(failedEntry).AsPrefix()] = failedEntry
+	for _, addr := range t.Players {
+		curId := t.addrToId(addr)
+		curPrefix := curId.AsPrefix()
+		_, isUnreachable := t.FailedHops[curPrefix]
+		if !isUnreachable && t.closerToDestination(curId, toId) {
+			// overwrite the next hop to dest with the alternative
+			t.NextHop[routingPrefix] = addr
+			return nil
+		}
+	}
+	// no alternative found, delete the entry
+	delete(t.NextHop, routingPrefix)
 	return nil
 }
