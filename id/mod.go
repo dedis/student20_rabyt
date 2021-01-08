@@ -13,6 +13,8 @@ type NodeID interface {
 	Base() byte
 	GetDigit(pos int) byte
 	Equals(other NodeID) bool
+	AsBigInt() *big.Int
+	AsPrefix() Prefix
 	CommonPrefix(other NodeID) (Prefix, error)
 	CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, error)
 }
@@ -76,6 +78,15 @@ func (id ArrayNodeID) Equals(other NodeID) bool {
 		}
 		return true
 	}
+}
+
+func (id ArrayNodeID) AsBigInt() *big.Int {
+	return byteArrayToBigInt(id.id)
+}
+
+func (id ArrayNodeID) AsPrefix() Prefix {
+	prefix, _ := id.CommonPrefix(id)
+	return prefix
 }
 
 // CommonPrefix calculates a common prefix of two ids. Returns an error if
