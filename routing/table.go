@@ -181,10 +181,14 @@ func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 
 }
 
+func (t *RoutingTable) addrToId(addr mino.Address) id.NodeID {
+	return id.NewArrayNodeID(addr, t.thisNode.Base(), t.thisNode.Length())
+}
+
 // GetRoute implements router.RoutingTable. It calculates the next hop for a
 // given destination.
 func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
-	toId := id.NewArrayNodeID(to, t.thisNode.Base(), t.thisNode.Length())
+	toId := t.addrToId(to)
 	// Since id collisions are not expected, the only way this can happen is
 	// if this node is orchestrator's server side and the message is routed to
 	// orchestrator's client side. The only way the message can reach it is if
