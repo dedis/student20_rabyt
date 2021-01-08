@@ -96,6 +96,7 @@ class BroadcastMessage:
         self.sender = addr_to_node[self.sender]
 
 
+name_re = re.compile(r'(node[\d*])')
 node_address_re = re.compile(r'mino\[([0-9:.]*)\] is running')
 relay_re = re.compile(r'relay opened addr=([0-9:.]*) to=([0-9:.]*)')
 receive_re = re.compile(r'got \{(.*)} from [Orchestrator:]*([0-9:.]*)')
@@ -112,7 +113,7 @@ def strip_orchestrator(node: str):
 def read_logs(filename):
     node_addr = None
     # nodeN
-    node_name = os.path.basename(filename)
+    node_name = name_re.search(os.path.basename(filename)).groups()[0]
     this_node = None
     # after the logs have been processed, the encoding is the default utf-8
     for line in open(filename):
