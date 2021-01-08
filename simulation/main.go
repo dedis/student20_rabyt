@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"go.dedis.ch/simnet/sim/kubernetes"
 	"io"
@@ -125,9 +126,23 @@ func runSimulation(numNodes int, dockerImage string) error {
 }
 
 func main() {
-	err := runSimulation(10, PrefixRoutingImage)
+	var numNodes int
+	var routingProtocol string
+	algoToImage := map[string]string{"tree" : TreeRoutingImage, "prefix": PrefixRoutingImage}
+
+	flag.IntVar(&numNodes, "n", 10, "the number of nodes for simulation")
+	flag.StringVar(&routingProtocol, "protocol", "prefix",
+		"the routing protocol: must be 'tree' or 'prefix'")
+
+	flag.Parse()
+	image, ok := algoToImage[routingProtocol]
+	if !ok {
+		panic(fmt.Errorf("unexpected routing protocol requested: %s. " +
+			"Allowed --protocol values: %s", routingProtocol, algoToImage))
+	}
+
+	err := runSimulation(numNodes, image)
 	if err != nil {
 		panic(err)
 	}
 }
-
