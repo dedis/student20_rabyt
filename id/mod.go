@@ -19,7 +19,7 @@ type NodeID interface {
 
 // TODO: calculate these parameters from the number of players
 func BaseAndLenFromPlayers(numPlayers int) (byte, int) {
-	return 16, 3
+	return 16, 5
 }
 
 type ArrayNodeID struct {

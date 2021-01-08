@@ -97,6 +97,11 @@ func Example_stream_several() {
 	// Output: Success
 }
 
+func Example_stream_many() {
+	StreamN(50, 4000)
+	// Output: Success
+}
+
 // exampleHandler is an RPC handler example.
 //
 // - implements mino.Handler
