@@ -35,7 +35,7 @@ class Node:
 
 class Message:
     def __init__(self, content: str, sender: str, receiver: str):
-        assert content not in content_to_msg
+        assert content not in content_to_msg, 'duplicate message: ' + content
         self.msg = content
         self.sender = sender
         self.receiver = receiver
@@ -45,7 +45,7 @@ class Message:
         content_to_msg[content] = self
 
     def add_hop(self, sender: str, receiver: str):
-        assert sender not in self.hops
+        assert sender not in self.hops, 'duplicate "from" in message {{{}}} hops: from={}, to={} and {}'.format(self.msg, sender, self.hops[sender], receiver)
         self.hops[sender] = receiver
 
     def finalize(self):
@@ -126,7 +126,7 @@ def read_logs(filename):
         # phase, e.g. certificate exchange
         if this_node is not None and relay_re.search(line):
             fr, to = relay_re.search(line).groups()
-            assert fr == node_addr
+            assert fr == node_addr, 'this node is {}, but the relay.from={}'.format(node_addr, fr)
             this_node.open_connection(to)
         if receive_re.search(line):
             msg, fr = receive_re.search(line).groups()
@@ -141,7 +141,7 @@ def read_logs(filename):
                 src = strip_orchestrator(src)
                 BroadcastMessage.getOrCreate(msg, src).add_hop(prev, node_addr)
             else:
-                assert len(dests) == 1
+                assert len(dests) == 1, 'a message from {} to {}'.format(src, dests)
                 dest = strip_orchestrator(dests[0])
                 if msg not in content_to_msg:
                     Message(msg, src, dest)
