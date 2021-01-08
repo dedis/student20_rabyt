@@ -6,14 +6,15 @@ type Prefix interface {
 	IsPrefixOf(NodeID) bool
 }
 
-// Digits of the prefix have to be stored in a string, because this structure
+// StringPrefix is an implementation of Prefix.
+// Digits of the prefix are stored in a string, because this structure
 // is used as a key in the routing table map.
 type StringPrefix struct {
 	Digits string
 	Base   byte
 }
 
-// Tests if this prefix is a prefix of given id
+// IsPrefixOf tests if this prefix is a prefix of given id
 func (prefix StringPrefix) IsPrefixOf(id NodeID) bool {
 	if prefix.Base != id.Base() {
 		return false
@@ -26,12 +27,12 @@ func (prefix StringPrefix) IsPrefixOf(id NodeID) bool {
 	return true
 }
 
-// Returns the length of prefix
+// Length returns the length of prefix
 func (prefix StringPrefix) Length() int {
 	return len(prefix.Digits)
 }
 
-// Constructs a new prefix by appending the digit to this prefix
+// Append constructs a new prefix by appending the digit to this prefix
 func (prefix StringPrefix) Append(digit byte) Prefix {
 	return StringPrefix{prefix.Digits + string(digit), prefix.Base}
 }
