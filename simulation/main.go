@@ -121,7 +121,21 @@ func runSimulation(numNodes int, dockerImage string) error {
 
 	simulation := simnet.NewSimulation(simRound{}, engine)
 
-	err = simulation.Run(os.Args)
+	// os.Args might include arguments for this simulation as well as arguments
+	// for simnet. Look for --, separating the two argument groups
+	simnetExecName := fmt.Sprintf("%s : simnet", os.Args[0])
+	for i, arg := range os.Args {
+		if arg == "--" {
+			simArgs := make([]string, len(os.Args)-i)
+			copy(simArgs, os.Args[i:])
+			// will be used as the executable name
+			simArgs[0] = simnetExecName
+			err = simulation.Run(simArgs)
+			return err
+		}
+	}
+	// "--" not found, therefore arguments for simnet are not provided
+	err = simulation.Run([]string{simnetExecName})
 	return err
 }
 
@@ -135,6 +149,15 @@ func main() {
 		"the routing protocol: must be 'tree' or 'prefix'")
 
 	flag.Parse()
+
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr,
+			"Usage of routing protocol simulation: "+
+				"simulation-options -- simnet-options")
+		fmt.Fprintln(os.Stderr, "Simulation options are:")
+		flag.PrintDefaults()
+	}
+
 	image, ok := algoToImage[routingProtocol]
 	if !ok {
 		panic(fmt.Errorf("unexpected routing protocol requested: %s. " +
