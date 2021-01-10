@@ -17,29 +17,41 @@ import (
 	"golang.org/x/xerrors"
 )
 
-type simRound struct{}
+type simRound struct {
+	replyAll bool
+}
 
-func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
+func (s simRound) getToken(simio sim.IO, node sim.NodeInfo) ([]string, error) {
+	buf := new(bytes.Buffer)
+	err := simio.Exec(node.Name, []string{"./memcoin", "--config",
+		"/tmp/node", "minogrpc", "token"}, sim.ExecOptions{
+		Stdout: buf,
+	})
+	if err != nil {
+		return nil, xerrors.Errorf("error getting token: %v", err)
+	}
+	token := strings.Split(buf.String(), " ")
+	return token, nil
+}
+
+func (s simRound) sendToken(simio sim.IO, from sim.NodeInfo,
+	to []sim.NodeInfo) error {
 	reader, writer := io.Pipe()
 
 	go io.Copy(os.Stdout, reader)
 
-	// Exchange certs
-	buf := new(bytes.Buffer)
-	err := simio.Exec(nodes[0].Name, []string{"./memcoin", "--config", "/tmp/node", "minogrpc", "token"}, sim.ExecOptions{
-		Stdout: buf,
-	})
+	token, err := s.getToken(simio, from)
 	if err != nil {
-		return xerrors.Errorf("error getting token: %v", err)
+		return err
 	}
-	token := strings.Split(buf.String(), " ")
 	tokenCmd := []string{
-				"./memcoin", "--config", "/tmp/node", "minogrpc", "join",
-				"--address", fmt.Sprintf("%s:2000", nodes[0].Address)}
+		"./memcoin", "--config", "/tmp/node", "minogrpc", "join",
+		"--address", fmt.Sprintf("%s:2000", from.Address)}
 	tokenCmd = append(tokenCmd, token...)
-	for i := 1; i < len(nodes); i++ {
+
+	for _, toNode := range to {
 		err := simio.Exec(
-			nodes[i].Name,
+			toNode.Name,
 			tokenCmd,
 			sim.ExecOptions{
 				Stdout: writer,
@@ -50,19 +62,53 @@ func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 			return err
 		}
 	}
+	return nil
+}
 
-	// Exchange messages
-	cmd := []string{"./memcoin", "--config", "/tmp/node", "minogrpc", "stream"}
-	for i := 1; i < len(nodes); i++ {
-		cmd = append(cmd, []string{"--addresses", fmt.Sprintf("F%s:2000", nodes[i].Address)}...)
+func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
+	// Exchange certs
+	err := s.sendToken(simio, nodes[0], nodes[1:])
+	if err != nil {
+		return err
 	}
-	cmd = append(cmd, []string{"--message", "SetupMessage"}...)
-	err = simio.Exec(nodes[0].Name, cmd, sim.ExecOptions{
-		Stdout: writer,
-		Stderr: writer,
-	})
+	// everyone has to exchange certs with everyone
+	if s.replyAll {
+		for i := 1; i < len(nodes)-1; i++ {
+			err := s.sendToken(simio, nodes[i], nodes[i+1:])
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	return nil
+}
+
+func (s simRound) createMessage(text string, destinations []sim.NodeInfo) string {
+	var builder strings.Builder
+	builder.WriteString(text)
+	builder.WriteString("#")
+	if s.replyAll {
+		builder.WriteString("ReplyAll:")
+		for i, n := range destinations {
+			builder.WriteString(fmt.Sprintf("F%s:2000", n.Address))
+			// no trailing comma
+			if i < len(destinations)-1 {
+				builder.WriteString(",")
+			}
+		}
+	}
+	return builder.String()
+}
+
+func (s simRound) createMessageCommand(text string,
+	destinations []sim.NodeInfo) []string {
+	cmd := []string{"./memcoin", "--config", "/tmp/node", "minogrpc", "stream"}
+	for _, n := range destinations {
+		cmd = append(cmd, []string{"--addresses", fmt.Sprintf("F%s:2000",
+			n.Address)}...)
+	}
+	return append(cmd, []string{"--message", text}...)
 }
 
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
@@ -71,13 +117,9 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	go io.Copy(os.Stdout, reader)
 
-	// Exchange messages
-	cmd := []string{"./memcoin", "--config", "/tmp/node", "minogrpc", "stream"}
-	for i := 1; i < len(nodes); i++ {
-		cmd = append(cmd, []string{"--addresses", fmt.Sprintf("F%s:2000", nodes[i].Address)}...)
-	}
-	cmd = append(cmd, []string{"--message", "TrueMessage"}...)
-
+	// Exchange messages. Destinations are all nodes but orchestrator
+	msgWithCommands := s.createMessage("Message", nodes[1:])
+	cmd := s.createMessageCommand(msgWithCommands, nodes[1:])
 	err := simio.Exec(nodes[0].Name, cmd, sim.ExecOptions{
 		Stdout: writer,
 		Stderr: writer,
@@ -110,7 +152,7 @@ const (
 	PrefixRoutingImage = "katjag/prefix-routing-simulation"
 )
 
-func runSimulation(numNodes int, dockerImage string) error {
+func runSimulation(numNodes int, dockerImage string, round simRound) error {
 	options := createSimOptions(numNodes, dockerImage)
 
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
@@ -119,7 +161,7 @@ func runSimulation(numNodes int, dockerImage string) error {
 		return err
 	}
 
-	simulation := simnet.NewSimulation(simRound{}, engine)
+	simulation := simnet.NewSimulation(round, engine)
 
 	// os.Args might include arguments for this simulation as well as arguments
 	// for simnet. Look for --, separating the two argument groups
@@ -140,18 +182,23 @@ func runSimulation(numNodes int, dockerImage string) error {
 }
 
 const (
-	numNodesFlag         = "n"
-	protocolFlag         = "protocol"
+	numNodesFlag = "n"
+	protocolFlag = "protocol"
+	replyAllFlag = "replyAll"
 )
 
 func main() {
 	var numNodes int
 	var routingProtocol string
+	var s simRound
 	algoToImage := map[string]string{"tree": TreeRoutingImage, "prefix": PrefixRoutingImage}
 
 	flag.IntVar(&numNodes, numNodesFlag, 10, "the number of nodes for simulation")
 	flag.StringVar(&routingProtocol, protocolFlag, "prefix",
 		"the routing protocol: must be 'tree' or 'prefix'")
+	flag.BoolVar(&s.replyAll, replyAllFlag, false,
+		"upon receiving the message from orchestrator, "+
+			"followers send a message to all other participants")
 
 	flag.Parse()
 
@@ -170,7 +217,7 @@ func main() {
 			algoToImage))
 	}
 
-	err := runSimulation(numNodes, image)
+	err := runSimulation(numNodes, image, s)
 	if err != nil {
 		panic(err)
 	}
