@@ -139,13 +139,18 @@ func runSimulation(numNodes int, dockerImage string) error {
 	return err
 }
 
+const (
+	numNodesFlag         = "n"
+	protocolFlag         = "protocol"
+)
+
 func main() {
 	var numNodes int
 	var routingProtocol string
-	algoToImage := map[string]string{"tree" : TreeRoutingImage, "prefix": PrefixRoutingImage}
+	algoToImage := map[string]string{"tree": TreeRoutingImage, "prefix": PrefixRoutingImage}
 
-	flag.IntVar(&numNodes, "n", 10, "the number of nodes for simulation")
-	flag.StringVar(&routingProtocol, "protocol", "prefix",
+	flag.IntVar(&numNodes, numNodesFlag, 10, "the number of nodes for simulation")
+	flag.StringVar(&routingProtocol, protocolFlag, "prefix",
 		"the routing protocol: must be 'tree' or 'prefix'")
 
 	flag.Parse()
@@ -160,8 +165,9 @@ func main() {
 
 	image, ok := algoToImage[routingProtocol]
 	if !ok {
-		panic(fmt.Errorf("unexpected routing protocol requested: %s. " +
-			"Allowed --protocol values: %s", routingProtocol, algoToImage))
+		panic(fmt.Errorf("unexpected routing protocol requested: %s. "+
+			"Allowed --%s values: %s", routingProtocol, protocolFlag,
+			algoToImage))
 	}
 
 	err := runSimulation(numNodes, image)
