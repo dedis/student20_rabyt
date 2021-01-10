@@ -254,5 +254,5 @@ func (t *RoutingTable) OnFailure(dest mino.Address) error {
 	}
 	// no alternative found, delete the entry
 	delete(t.NextHop, routingPrefix)
-	return nil
+	return fmt.Errorf("all next hops to %s are unavailable", dest.String())
 }
