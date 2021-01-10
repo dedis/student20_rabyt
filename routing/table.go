@@ -197,6 +197,11 @@ func (t *RoutingTable) addrToId(addr mino.Address) id.NodeID {
 // GetRoute implements router.RoutingTable. It calculates the next hop for a
 // given destination.
 func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
+	// Client side of the orchestrator or the server side of the orchestrator
+	// which is the only player
+	if len(t.NextHop) == 0 {
+		return nil, nil
+	}
 	toId := t.addrToId(to)
 	// Since id collisions are not expected, the only way this can happen is
 	// if this node is orchestrator's server side and the message is routed to
