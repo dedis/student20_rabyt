@@ -14,6 +14,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"github.com/dedis/student20_rabyt/routing"
 	"io"
 	"math"
 	"net"
@@ -32,7 +33,6 @@ import (
 	"go.dedis.ch/dela/mino/minogrpc"
 	"go.dedis.ch/dela/mino/minogrpc/certs"
 	"go.dedis.ch/dela/mino/minogrpc/session"
-	"go.dedis.ch/dela/mino/router/tree" // TODO: replace with your router package
 	"golang.org/x/xerrors"
 )
 
@@ -130,8 +130,7 @@ func (m miniController) OnStart(ctx cli.Flags, inj node.Injector) error {
 		return xerrors.Errorf("invalid port value %d", port)
 	}
 
-	// TODO: replace with your router
-	rter := tree.NewRouter(minogrpc.NewAddressFactory())
+	rter := routing.NewRouter(minogrpc.NewAddressFactory())
 
 	myIP, err := findIP()
 	if err != nil {
