@@ -2,7 +2,7 @@ package id
 
 type Prefix interface {
 	Length() int
-	Append(byte) Prefix
+	Append(byte) StringPrefix
 	IsPrefixOf(NodeID) bool
 }
 
@@ -12,6 +12,7 @@ type Prefix interface {
 type StringPrefix struct {
 	Digits string
 	Base   byte
+	Offset byte
 }
 
 // IsPrefixOf tests if this prefix is a prefix of given id
@@ -20,7 +21,7 @@ func (prefix StringPrefix) IsPrefixOf(id NodeID) bool {
 		return false
 	}
 	for i := 0; i < len(prefix.Digits); i++ {
-		if prefix.Digits[i] != id.GetDigit(i) {
+		if prefix.Digits[i] - prefix.Offset != id.GetDigit(i) {
 			return false
 		}
 	}
@@ -33,6 +34,7 @@ func (prefix StringPrefix) Length() int {
 }
 
 // Append constructs a new prefix by appending the digit to this prefix
-func (prefix StringPrefix) Append(digit byte) Prefix {
-	return StringPrefix{prefix.Digits + string(digit), prefix.Base}
+func (prefix StringPrefix) Append(digit byte) StringPrefix {
+	return StringPrefix{prefix.Digits + string(digit + prefix.Offset), prefix.Base,
+		prefix.Offset}
 }

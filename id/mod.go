@@ -14,9 +14,9 @@ type NodeID interface {
 	GetDigit(pos int) byte
 	Equals(other NodeID) bool
 	AsBigInt() *big.Int
-	AsPrefix() Prefix
-	CommonPrefix(other NodeID) (Prefix, error)
-	CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, error)
+	AsPrefix() StringPrefix
+	CommonPrefix(other NodeID) (StringPrefix, error)
+	CommonPrefixAndFirstDifferentDigit(other NodeID) (StringPrefix, error)
 }
 
 // TODO: calculate these parameters from the number of players
@@ -84,41 +84,46 @@ func (id ArrayNodeID) AsBigInt() *big.Int {
 	return byteArrayToBigInt(id.id)
 }
 
-func (id ArrayNodeID) AsPrefix() Prefix {
+func (id ArrayNodeID) AsPrefix() StringPrefix {
 	prefix, _ := id.CommonPrefix(id)
 	return prefix
 }
 
+const (
+	OffsetA = 65
+)
+
 // CommonPrefix calculates a common prefix of two ids. Returns an error if
 // bases or lengths of the ids are different.
-func (id ArrayNodeID) CommonPrefix(other NodeID) (Prefix, error) {
+func (id ArrayNodeID) CommonPrefix(other NodeID) (StringPrefix, error) {
 	if id.Base() != other.Base() {
-		return nil, errors.New("can't compare ids of different bases")
+		return StringPrefix{}, errors.New("can't compare ids of different bases")
 	}
 	if id.Length() != other.Length() {
-		return nil, errors.New("can't compare ids of different lengths")
+		return StringPrefix{}, errors.New("can't compare ids of different lengths")
 	}
 	prefix := []byte{}
 	for i := 0; i < id.Length(); i++ {
 		if id.GetDigit(i) != other.GetDigit(i) {
 			break
 		}
-		prefix = id.id[0:i+1]
+		prefix = append(prefix, id.GetDigit(i) + OffsetA)
 	}
-	return StringPrefix{string(prefix), id.Base()}, nil
+	return StringPrefix{string(prefix), id.Base(), OffsetA}, nil
 }
 
 // CommonPrefixAndFirstDifferentDigit returns the common prefix of the two ids
 // and the first digit of this id that is different from corresponding other's
 // digit. Returns an error if bases or lengths of the ids are different, or if
 // ids are equal.
-func (id ArrayNodeID) CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, error) {
+func (id ArrayNodeID) CommonPrefixAndFirstDifferentDigit(other NodeID) (StringPrefix,
+	error) {
 	commonPrefix, err := id.CommonPrefix(other)
 	if err != nil {
-		return nil, err
+		return StringPrefix{}, err
 	}
 	if commonPrefix.Length() == id.Length() {
-		return nil, errors.New("ids are equal")
+		return StringPrefix{}, errors.New("ids are equal")
 	}
 	return commonPrefix.Append(id.GetDigit(commonPrefix.Length())), nil
 }
