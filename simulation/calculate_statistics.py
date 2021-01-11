@@ -1,7 +1,9 @@
+#!/usr/bin/python3.7
 from __future__ import annotations
 import encodings
 import re
 import os
+import sys
 
 LOGS_PATH = '/home/cache-nez/.config/simnet/logs'
 
@@ -195,6 +197,22 @@ def main():
     for file in os.scandir(LOGS_PATH):
         strip_colors(file.path)
         read_logs(file.path)
+    if len(sys.argv) > 1 and sys.argv[1] == '--hops':
+        hops = set()
+        for bm in BroadcastMessage.getMessages():
+            for (src, dest) in bm.hops:
+                # add links only in one direction
+                if src != dest and (dest, src) not in hops:
+                    hops.add((src, dest))
+        for m in content_to_msg.values():
+            for src, dest in m.hops.items():
+                # add links only in one direction
+                if src != dest and (dest, src) not in hops:
+                    hops.add((src, dest))
+        for (src, dest) in hops:
+            print(addr_to_node[src].name, addr_to_node[dest].name)
+        return
+
     for n in sorted(addr_to_node.values(), key=lambda n: n.name):
         # n.finalize()
         print('{} ({}): {} open connections, {} messages received'.format(

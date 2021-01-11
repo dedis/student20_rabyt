@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,6 +33,7 @@ type simRound struct {
 	disconnectAfterOrchestratorMsg  bool
 	// percentage of broken links
 	disconnectPercentage int
+	dropUsedLinks        bool
 
 	logsDir string
 }
@@ -85,6 +87,15 @@ type Link struct {
 	dest string
 }
 
+func addLink(src string, dest string, srcToDest map[string][]string) {
+	dests, in := srcToDest[src]
+	if in {
+		srcToDest[src] = append(dests, dest)
+	} else {
+		srcToDest[src] = []string{dest}
+	}
+}
+
 func disconnectLinks(simio sim.IO, links []Link,
 	disconnectPercentage int) error {
 	numToDisconnect := disconnectPercentage * len(links) / 100
@@ -94,6 +105,8 @@ func disconnectLinks(simio sim.IO, links []Link,
 	}
 	fmt.Printf("Disconnecting %d out of %d links (~%d%%)\n", numToDisconnect,
 		len(links), disconnectPercentage)
+	// group links by source
+	linksToDisconnect := make(map[string][]string)
 	// choose links to disconnect at random by shuffling links and
 	// taking first numToDisconnect links
 	// shuffling is done implicitly by generating a random permutation of
@@ -104,27 +117,48 @@ func disconnectLinks(simio sim.IO, links []Link,
 		src, dest := toDisconnect.src, toDisconnect.dest
 		// Disconnect only disconnects links one way, so add both directions
 		// to break the link
-		err := simio.Disconnect(src, dest)
+		addLink(src, dest, linksToDisconnect)
+		addLink(dest, src, linksToDisconnect)
+	}
+	for src, dests := range linksToDisconnect {
+		err := simio.Disconnect(src, dests...)
 		if err != nil {
 			return err
 		}
-		err = simio.Disconnect(dest, src)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("disconnected %s <-> %s\n", src, dest)
+		fmt.Printf("disconnected %s <-> %s\n", src, dests)
 	}
 	return nil
 }
 
-func (s simRound) candidatesToDisconnect(nodes []sim.NodeInfo) []Link {
+func (s simRound) candidatesToDisconnect(nodes []sim.NodeInfo) ([]Link, error) {
+	if s.dropUsedLinks {
+		// TODO: a more reliable way
+		output, err := exec.Command("./calculate_statistics.py",
+			"--hops").Output()
+		if err != nil {
+			fmt.Println(err)
+			return nil, err
+		}
+		hops := strings.Split(string(output), "\n")
+		links := make([]Link, 0, len(hops))
+		for _, hop := range hops {
+			srcDest := strings.Split(hop, " ")
+			if len(srcDest) < 2 {
+				continue
+			}
+			src := srcDest[0]
+			dest := srcDest[1]
+			links = append(links, Link{src, dest})
+		}
+		return links, nil
+	}
 	links := make([]Link, 0, len(nodes)*(len(nodes)-1))
 	for i := 0; i < len(nodes); i++ {
 		for j := i + 1; j < len(nodes); j++ {
 			links = append(links, Link{nodes[i].Name, nodes[j].Name})
 		}
 	}
-	return links
+	return links, nil
 }
 
 func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
@@ -144,7 +178,11 @@ func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	}
 
 	if s.disconnectBeforeOrchestratorMsg {
-		return disconnectLinks(simio, s.candidatesToDisconnect(nodes), s.disconnectPercentage)
+		links, err := s.candidatesToDisconnect(nodes)
+		if err != nil {
+			return err
+		}
+		return disconnectLinks(simio, links, s.disconnectPercentage)
 	}
 
 	return nil
@@ -236,7 +274,11 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		}
 		wg.Wait()
 
-		err = disconnectLinks(simio, s.candidatesToDisconnect(nodes), s.disconnectPercentage)
+		links, err := s.candidatesToDisconnect(nodes)
+		if err != nil {
+			return err
+		}
+		err = disconnectLinks(simio, links, s.disconnectPercentage)
 		if err != nil {
 			return err
 		}
@@ -257,7 +299,7 @@ func createSimOptions(numNodes int, dockerImage string) []sim.Option {
 		),
 		sim.WithImage(dockerImage, nil, nil,
 			sim.NewTCP(2000)),
-		kubernetes.WithResources("20m", "64Mi"),
+		kubernetes.WithResources("20m", "20Mi"),
 	}
 }
 
@@ -305,6 +347,7 @@ const (
 	disconnectBeforeFlag = "disconnect-before"
 	disconnectAfterFlag  = "disconnect-after"
 	percentageFlag       = "disconnect-percentage"
+	usedLinksFlag        = "drop-used-links"
 )
 
 func main() {
@@ -326,11 +369,15 @@ func main() {
 	flag.BoolVar(&s.disconnectAfterOrchestratorMsg, disconnectAfterFlag, false,
 		"break some network links after orchestrator's message is sent but "+
 			"before the replies."+
-			fmt.Sprintf("See --%s for further options", percentageFlag))
+			fmt.Sprintf("See --%s and --%s for further options",
+				percentageFlag, usedLinksFlag))
 	flag.IntVar(&s.disconnectPercentage, percentageFlag, 10,
 		"percentage of broken links."+
 			fmt.Sprintf("Has effect only if --%s or --%s is set",
 				disconnectBeforeFlag, disconnectAfterFlag))
+	flag.BoolVar(&s.dropUsedLinks, "drop-used-links", false,
+		"drop links, used for routing (as opposed to a random subset)."+
+			fmt.Sprintf("Has effect only if --%s is set", disconnectAfterFlag))
 
 	flag.Parse()
 
@@ -359,6 +406,10 @@ func main() {
 	if s.disconnectPercentage < 0 || s.disconnectPercentage > 100 {
 		panic(fmt.Errorf("--%s values should be between 0 and 100. Got: %d",
 			percentageFlag, s.disconnectPercentage))
+	}
+	if s.disconnectBeforeOrchestratorMsg && s.dropUsedLinks {
+		panic(fmt.Errorf("--%s can only be specified with --%s, otherwise "+
+			"used links are not known", usedLinksFlag, disconnectAfterFlag))
 	}
 
 	err := runSimulation(numNodes, image, s)
