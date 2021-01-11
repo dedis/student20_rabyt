@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"github.com/dedis/student20_rabyt/id"
 	"github.com/dedis/student20_rabyt/routing/handshake"
+	"go.dedis.ch/dela"
 	"go.dedis.ch/dela/mino"
 	"go.dedis.ch/dela/mino/router"
 	"go.dedis.ch/dela/mino/router/tree/types"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -114,6 +116,8 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 	// the same prefix
 	randomShuffle(addresses)
 
+	dela.Logger.Trace().Msgf("%s (%s) built a routing table: ",
+		thisAddress.String(), thisId.AsPrefix().Digits)
 	hopMap := make(map[id.Prefix]mino.Address)
 	for _, address := range addresses {
 		if address.Equal(thisAddress) {
@@ -121,16 +125,18 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 		}
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
 		if otherId.Equals(thisId) {
-			return nil, fmt.Errorf("id collision: id %s for addresses %s" +
+			return nil, fmt.Errorf("id collision: id %s for addresses %s"+
 				" and %s", thisId, thisAddress.String(), address.String())
 		}
 		prefix, err := otherId.CommonPrefixAndFirstDifferentDigit(thisId)
 		if err != nil {
-			return nil, fmt.Errorf("error when calculating common prefix of" +
+			return nil, fmt.Errorf("error when calculating common prefix of"+
 				" ids: %s", err.Error())
 		}
 		if _, contains := hopMap[prefix]; !contains {
 			hopMap[prefix] = address
+			dela.Logger.Trace().Msgf("%s -> %s (%s)", prefix.Digits,
+				address.String(), otherId.AsPrefix().Digits)
 		}
 	}
 
@@ -161,10 +167,30 @@ func (t *RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 		ThisAddress: to, Addresses: t.Players}
 }
 
+func String(addrs []mino.Address) string {
+	var sb strings.Builder
+	for i, addr := range addrs {
+		if addr == nil {
+			sb.WriteString("nil")
+		} else {
+			sb.WriteString(addr.String())
+		}
+		if i < len(addrs) - 1 {
+			sb.WriteString(", ")
+		}
+	}
+	return sb.String()
+}
+
+
 // Forward implements router.RoutingTable. It splits the packet into multiple,
 // based on the calculated next hops.
 func (t *RoutingTable) Forward(packet router.Packet) (router.Routes,
 	router.Voids) {
+	dela.Logger.Trace().Stringer("this", t.thisAddress).Stringer("from",
+		packet.GetSource()).Str("dests", String(packet.GetDestination())).Msgf(
+		"%s: routing {%s} to %s", t.thisNode.AsPrefix().Digits, packet.GetMessage(),
+		packet.GetDestination())
 	routes := make(router.Routes)
 	voids := make(router.Voids)
 
@@ -186,6 +212,17 @@ func (t *RoutingTable) Forward(packet router.Packet) (router.Routes,
 		p.(*types.Packet).Add(dest)
 	}
 
+	dela.Logger.Trace().Msg("Routes:")
+	for nextHop, pkt := range routes {
+		dela.Logger.Trace().Stringer("nextHop",
+			nextHop).Str("dests", String(pkt.GetDestination())).Msgf("{%s}",
+				pkt.GetMessage())
+	}
+	dela.Logger.Trace().Msg("Voids:")
+	for dest, err := range voids {
+		dela.Logger.Trace().Stringer("dest",
+			dest).Msgf("Failed to route the message: %s", err)
+	}
 	return routes, voids
 
 }
