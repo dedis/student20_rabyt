@@ -52,12 +52,15 @@ class Message:
         if not self.finalized:
             self.sender = addr_to_node[self.sender]
             self.receiver = addr_to_node[self.receiver]
+            for addr, node in addr_to_node.items():
+                if addr in self.msg:
+                    self.msg = self.msg.replace(addr, node.name)
             self.finalized = True
+            self.calculate_path()
 
     def calculate_path(self):
-        if not self.finalized:
-            self.finalize()
         if self.path is None:
+            assert self.finalized
             self.path = [self.sender]
             while self.path[-1].addr != self.receiver.addr:
                 last_addr = self.path[-1].addr
@@ -197,11 +200,11 @@ def main():
         print('{} ({}): {} open connections, {} messages received'.format(
             n.name, n.addr, len(n.connections), len(n.received_msgs)))
     for m in sorted(content_to_msg.values(), key=lambda m: m.msg):
-        m.calculate_path()
+        m.finalize()
         # one of the hops is always orchestrator-server -> orchestrator-client
         hops = len(m.hops) - 1
         print('message "{}": {} hops: {}'.format(m.msg, hops,
-                                                 ' -> '.join(map(lambda n: n.addr, m.path))))
+                                                 ' -> '.join(map(lambda n: n.name, m.path))))
     for bm in BroadcastMessage.getMessages():
         # bm.finalize()
         # first hop is always orchestrator-server -> orchestrator-client
