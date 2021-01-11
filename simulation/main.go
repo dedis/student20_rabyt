@@ -123,6 +123,7 @@ func disconnectLinks(simio sim.IO, links []Link,
 	for src, dests := range linksToDisconnect {
 		err := simio.Disconnect(src, dests...)
 		if err != nil {
+			fmt.Printf("error disconnecting: %s\n", err.Error())
 			return err
 		}
 		fmt.Printf("disconnected %s <-> %s\n", src, dests)
