@@ -91,7 +91,7 @@ func (s simRound) createMessage(text string, destinations []sim.NodeInfo) string
 	if s.replyAll {
 		builder.WriteString("ReplyAll:")
 		for i, n := range destinations {
-			builder.WriteString(fmt.Sprintf("F%s:2000", n.Address))
+			builder.WriteString(fmt.Sprintf("%s:2000", n.Address))
 			// no trailing comma
 			if i < len(destinations)-1 {
 				builder.WriteString(",")
