@@ -184,7 +184,9 @@ func (s streamAction) Execute(req node.Context) error {
 					childCtx , cancelFn := context.WithTimeout(ctx, 95 * time.Millisecond)
 					from, reply, err := receiver.Recv(childCtx)
 					if err != nil {
-						dela.Logger.Error().Msgf("error receiving message: %v", err)
+						if err != context.DeadlineExceeded {
+							dela.Logger.Error().Msgf("error receiving message: %v", err)
+						}
 						continue
 					}
 					dela.Logger.Info().Msgf("%s got %s from %s",
