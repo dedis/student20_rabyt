@@ -99,8 +99,8 @@ class BroadcastMessage:
 name_re = re.compile(r'(node[\d*])')
 node_address_re = re.compile(r'mino\[([0-9:.]*)\] is running')
 relay_re = re.compile(r'relay opened addr=([0-9:.]*) to=([0-9:.]*)')
-receive_re = re.compile(r'got \{(.*)} from [Orchestrator:]*([0-9:.]*)')
-hop_re = re.compile(r'Forwarding \{(.*)\}, previous hop: ([0-9:.]*), source: ([Orchestrator0-9:.]*), destination: \[(.*)\]')
+receive_re = re.compile(r'got \{([^#]*).*} from [Orchestrator:]*([0-9:.]*)')
+hop_re = re.compile(r'Forwarding \{([^#]*).*\}, previous hop: ([0-9:.]*), source: ([Orchestrator0-9:.]*), destination: \[(.*)\]')
 ORCHESTRATOR_PREFIX = 'Orchestrator:'
 
 
@@ -200,7 +200,7 @@ def main():
         m.calculate_path()
         # one of the hops is always orchestrator-server -> orchestrator-client
         hops = len(m.hops) - 1
-        print('message "{}": {} hops: {} ({})'.format(m.msg, hops,
+        print('message "{}": {} hops: {}'.format(m.msg, hops,
                                                  ' -> '.join(map(lambda n: n.addr, m.path))))
     for bm in BroadcastMessage.getMessages():
         # bm.finalize()
