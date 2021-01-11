@@ -150,6 +150,7 @@ func createSimOptions(numNodes int, dockerImage string) []sim.Option {
 const (
 	TreeRoutingImage   = "katjag/dela-tree-simulation"
 	PrefixRoutingImage = "katjag/prefix-routing-simulation"
+	NaiveRoutingImage  = "katjag/naive-prefix-routing-simulation"
 )
 
 func runSimulation(numNodes int, dockerImage string, round simRound) error {
@@ -191,7 +192,8 @@ func main() {
 	var numNodes int
 	var routingProtocol string
 	var s simRound
-	algoToImage := map[string]string{"tree": TreeRoutingImage, "prefix": PrefixRoutingImage}
+	algoToImage := map[string]string{"tree": TreeRoutingImage,
+		"prefix": PrefixRoutingImage, "naive": NaiveRoutingImage}
 
 	flag.IntVar(&numNodes, numNodesFlag, 10, "the number of nodes for simulation")
 	flag.StringVar(&routingProtocol, protocolFlag, "prefix",
