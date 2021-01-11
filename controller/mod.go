@@ -284,6 +284,11 @@ func (h exampleHandler) replyMultiple(msgFormat string, addrs string,
 	sender mino.Sender) error {
 	var err error = nil
 	for _, addr := range strings.Split(addrs, AddressSeparator) {
+		toAddr := session.NewAddress(addr)
+		// do not send the message to self
+		if toAddr.Equal(h.thisAddress) {
+			continue
+		}
 		reply := fmt.Sprintf(msgFormat, addr)
 		currErr := <-sender.Send(exampleMessage{reply}, session.NewAddress(addr))
 
