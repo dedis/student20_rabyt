@@ -299,7 +299,7 @@ func (h exampleHandler) replyMultiple(msgFormat string, addrs string,
 }
 
 func (h exampleHandler) processMessage(from mino.Address, msg serde.Message,
-	sender mino.Sender) error {
+	sender mino.Sender)  {
 
 	commandText := msg.(exampleMessage).value
 	parts := strings.Split(commandText, TextCommandSeparator)
@@ -310,12 +310,13 @@ func (h exampleHandler) processMessage(from mino.Address, msg serde.Message,
 	}
 
 	if strings.Contains(command, NoReplyCommand) {
-		return nil
+		return
 	}
 
-	// Wait for the simulation to disconnect some links
+	// Wait for the simulation to disconnect some links, and the disconnected
+	// links to be discovered by grpc
 	if strings.Contains(command, WaitCommand) {
-		time.Sleep(5 * time.Second)
+		time.Sleep(30 * time.Second)
 	}
 
 	var err error = nil
@@ -332,9 +333,14 @@ func (h exampleHandler) processMessage(from mino.Address, msg serde.Message,
 
 	// Reply the sender (the sender either includes NoReply or is the
 	// orchestrator, not included in the address list in ReplyAll)
+	// Sleep before the reply to allow (potential) replyAll messages to arrive
+	time.Sleep(time.Second)
 	reply := fmt.Sprintf(replyFormat, from)
 	currErr := <-sender.Send(exampleMessage{reply}, from)
-	return appendError(err, currErr)
+	err = appendError(err, currErr)
+	if err != nil {
+		dela.Logger.Error().Err(err)
+	}
 }
 
 // Stream implements mino.Handler. It returns the message to the sender.
@@ -353,10 +359,7 @@ func (h exampleHandler) Stream(sender mino.Sender, recv mino.Receiver) error {
 
 		dela.Logger.Info().Msgf("%s got %s from %s", h.thisAddress, msg,
 			from.String())
-		err = h.processMessage(from, msg, sender)
-		if err != nil {
-			return err
-		}
+		go h.processMessage(from, msg, sender)
 	}
 }
 

@@ -171,7 +171,7 @@ func (s streamAction) Execute(req node.Context) error {
 		go func() {
 			tick := time.Tick(100 * time.Millisecond)
 			counter := 0
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			for {
 				select {
