@@ -235,22 +235,28 @@ func checkMessageDelivered(wg *sync.WaitGroup, file *os.File, msg string) {
 	}
 }
 
+func sendMessage(simio sim.IO, node sim.NodeInfo, cmd []string, ready chan struct{}) {
+	reader, writer := io.Pipe()
+	go io.Copy(os.Stdout, reader)
+
+	simio.Exec(node.Name, cmd, sim.ExecOptions{
+		Stdout: writer,
+		Stderr: writer,
+	})
+
+	writer.Close()
+	close(ready)
+}
+
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	fmt.Printf("Orchestrator is: %s at %s\n", nodes[0].Name, nodes[0].Address)
-	reader, writer := io.Pipe()
-
-	go io.Copy(os.Stdout, reader)
 
 	// Exchange messages. Destinations are all nodes but orchestrator
 	msgWithCommands := s.createMessage("Message", nodes[1:])
 	cmd := s.createMessageCommand(msgWithCommands, nodes[1:])
-	err := simio.Exec(nodes[0].Name, cmd, sim.ExecOptions{
-		Stdout: writer,
-		Stderr: writer,
-	})
-	if err != nil {
-		return err
-	}
+	ready := make(chan struct{})
+	// TODO: can I use simio concurrently?
+	go sendMessage(simio, nodes[0], cmd, ready)
 
 	if s.disconnectAfterOrchestratorMsg {
 		// wait until the message from the orchestrator is delivered to all
@@ -285,7 +291,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		}
 	}
 
-	writer.Close()
+	<-ready
 	return nil
 }
 
