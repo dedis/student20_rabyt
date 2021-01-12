@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"flag"
 	"fmt"
 	"go.dedis.ch/simnet/sim/kubernetes"
 	"io"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"go.dedis.ch/simnet"
@@ -26,6 +29,7 @@ func init() {
 type simRound struct {
 	replyAll                        bool
 	disconnectBeforeOrchestratorMsg bool
+	disconnectAfterOrchestratorMsg  bool
 	// percentage of broken links
 	disconnectPercentage int
 
@@ -150,6 +154,10 @@ func (s simRound) createMessage(text string, destinations []sim.NodeInfo) string
 	var builder strings.Builder
 	builder.WriteString(text)
 	builder.WriteString("#")
+	if s.disconnectAfterOrchestratorMsg {
+		// wait before replying so that simnet has enough time to break links
+		builder.WriteString("Wait")
+	}
 	if s.replyAll {
 		builder.WriteString("ReplyAll:")
 		for i, n := range destinations {
@@ -173,6 +181,21 @@ func (s simRound) createMessageCommand(text string,
 	return append(cmd, []string{"--message", text}...)
 }
 
+func checkMessageDelivered(wg *sync.WaitGroup, file *os.File, msg string) {
+	defer wg.Done()
+
+	for {
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			text := scanner.Text()
+			if strings.Contains(text, "got") && strings.Contains(text, msg) {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	fmt.Printf("Orchestrator is: %s at %s\n", nodes[0].Name, nodes[0].Address)
 	reader, writer := io.Pipe()
@@ -188,6 +211,35 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if s.disconnectAfterOrchestratorMsg {
+		// wait until the message from the orchestrator is delivered to all
+		// nodes
+		logFiles, err := ioutil.ReadDir(s.logsDir)
+		if err != nil {
+			return fmt.Errorf("error reading log directory: %w", err)
+		}
+		var wg sync.WaitGroup
+		for _, log := range logFiles {
+			// skip orchestrator's log
+			if strings.Contains(log.Name(), "-" + nodes[0].Name + "-") {
+				continue
+			}
+			file, err := os.Open(filepath.Join(s.logsDir, log.Name()))
+			if err != nil {
+				return fmt.Errorf("error reading a log file %s: %w",
+					log.Name(), err)
+			}
+			wg.Add(1)
+			go checkMessageDelivered(&wg, file, msgWithCommands)
+		}
+		wg.Wait()
+
+		err = disconnectLinks(simio, s.candidatesToDisconnect(nodes), s.disconnectPercentage)
+		if err != nil {
+			return err
+		}
 	}
 
 	writer.Close()
@@ -224,6 +276,8 @@ func runSimulation(numNodes int, dockerImage string, round simRound) error {
 		return err
 	}
 
+	// Save the logs directory location in the simulation round
+	round.logsDir = filepath.Join(sim.NewOptions(options).OutputDir, "logs")
 	simulation := simnet.NewSimulation(round, engine)
 
 	// os.Args might include arguments for this simulation as well as arguments
@@ -249,6 +303,7 @@ const (
 	protocolFlag         = "protocol"
 	replyAllFlag         = "replyAll"
 	disconnectBeforeFlag = "disconnect-before"
+	disconnectAfterFlag  = "disconnect-after"
 	percentageFlag       = "disconnect-percentage"
 )
 
@@ -268,10 +323,14 @@ func main() {
 	flag.BoolVar(&s.disconnectBeforeOrchestratorMsg, disconnectBeforeFlag, false,
 		"break some network links before any messages are sent."+
 			fmt.Sprintf("See --%s for further options", percentageFlag))
+	flag.BoolVar(&s.disconnectAfterOrchestratorMsg, disconnectAfterFlag, false,
+		"break some network links after orchestrator's message is sent but "+
+			"before the replies."+
+			fmt.Sprintf("See --%s for further options", percentageFlag))
 	flag.IntVar(&s.disconnectPercentage, percentageFlag, 10,
 		"percentage of broken links."+
-			fmt.Sprintf("Has effect only if --%s is set",
-				disconnectBeforeFlag))
+			fmt.Sprintf("Has effect only if --%s or --%s is set",
+				disconnectBeforeFlag, disconnectAfterFlag))
 
 	flag.Parse()
 
@@ -289,7 +348,12 @@ func main() {
 			"Allowed --%s values: %s", routingProtocol, protocolFlag,
 			algoToImage))
 	}
-	if s.disconnectBeforeOrchestratorMsg && s.disconnectPercentage == 0 {
+	if s.disconnectBeforeOrchestratorMsg && s.disconnectAfterOrchestratorMsg {
+		panic(fmt.Errorf("--%s and --%s cannot be both set",
+			disconnectBeforeFlag, disconnectAfterFlag))
+	}
+	if (s.disconnectBeforeOrchestratorMsg || s.disconnectAfterOrchestratorMsg) && s.
+		disconnectPercentage == 0 {
 		panic(fmt.Errorf("network disconnect requested but %s = 0", percentageFlag))
 	}
 	if s.disconnectPercentage < 0 || s.disconnectPercentage > 100 {
