@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go.dedis.ch/simnet/sim/kubernetes"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +18,18 @@ import (
 	"golang.org/x/xerrors"
 )
 
+func init() {
+	s := time.Now().UnixNano()
+	rand.Seed(s)
+}
+
 type simRound struct {
-	replyAll bool
+	replyAll                        bool
+	disconnectBeforeOrchestratorMsg bool
+	// percentage of broken links
+	disconnectPercentage int
+
+	logsDir string
 }
 
 func (s simRound) getToken(simio sim.IO, node sim.NodeInfo) ([]string, error) {
@@ -65,6 +76,53 @@ func (s simRound) sendToken(simio sim.IO, from sim.NodeInfo,
 	return nil
 }
 
+type Link struct {
+	src  string
+	dest string
+}
+
+func disconnectLinks(simio sim.IO, links []Link,
+	disconnectPercentage int) error {
+	numToDisconnect := disconnectPercentage * len(links) / 100
+	// +1 to ceil()
+	if (disconnectPercentage*len(links))%100 > 0 {
+		numToDisconnect += 1
+	}
+	fmt.Printf("Disconnecting %d out of %d links (~%d%%)\n", numToDisconnect,
+		len(links), disconnectPercentage)
+	// choose links to disconnect at random by shuffling links and
+	// taking first numToDisconnect links
+	// shuffling is done implicitly by generating a random permutation of
+	// indices (to keep the links slice unmodified)
+	indexPermutation := rand.Perm(len(links))
+	for i := 0; i < numToDisconnect; i++ {
+		toDisconnect := links[indexPermutation[i]]
+		src, dest := toDisconnect.src, toDisconnect.dest
+		// Disconnect only disconnects links one way, so add both directions
+		// to break the link
+		err := simio.Disconnect(src, dest)
+		if err != nil {
+			return err
+		}
+		err = simio.Disconnect(dest, src)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("disconnected %s <-> %s\n", src, dest)
+	}
+	return nil
+}
+
+func (s simRound) candidatesToDisconnect(nodes []sim.NodeInfo) []Link {
+	links := make([]Link, 0, len(nodes)*(len(nodes)-1))
+	for i := 0; i < len(nodes); i++ {
+		for j := i + 1; j < len(nodes); j++ {
+			links = append(links, Link{nodes[i].Name, nodes[j].Name})
+		}
+	}
+	return links
+}
+
 func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	// Exchange certs
 	err := s.sendToken(simio, nodes[0], nodes[1:])
@@ -79,6 +137,10 @@ func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 				return err
 			}
 		}
+	}
+
+	if s.disconnectBeforeOrchestratorMsg {
+		return disconnectLinks(simio, s.candidatesToDisconnect(nodes), s.disconnectPercentage)
 	}
 
 	return nil
@@ -183,9 +245,11 @@ func runSimulation(numNodes int, dockerImage string, round simRound) error {
 }
 
 const (
-	numNodesFlag = "n"
-	protocolFlag = "protocol"
-	replyAllFlag = "replyAll"
+	numNodesFlag         = "n"
+	protocolFlag         = "protocol"
+	replyAllFlag         = "replyAll"
+	disconnectBeforeFlag = "disconnect-before"
+	percentageFlag       = "disconnect-percentage"
 )
 
 func main() {
@@ -201,6 +265,13 @@ func main() {
 	flag.BoolVar(&s.replyAll, replyAllFlag, false,
 		"upon receiving the message from orchestrator, "+
 			"followers send a message to all other participants")
+	flag.BoolVar(&s.disconnectBeforeOrchestratorMsg, disconnectBeforeFlag, false,
+		"break some network links before any messages are sent."+
+			fmt.Sprintf("See --%s for further options", percentageFlag))
+	flag.IntVar(&s.disconnectPercentage, percentageFlag, 10,
+		"percentage of broken links."+
+			fmt.Sprintf("Has effect only if --%s is set",
+				disconnectBeforeFlag))
 
 	flag.Parse()
 
@@ -217,6 +288,13 @@ func main() {
 		panic(fmt.Errorf("unexpected routing protocol requested: %s. "+
 			"Allowed --%s values: %s", routingProtocol, protocolFlag,
 			algoToImage))
+	}
+	if s.disconnectBeforeOrchestratorMsg && s.disconnectPercentage == 0 {
+		panic(fmt.Errorf("network disconnect requested but %s = 0", percentageFlag))
+	}
+	if s.disconnectPercentage < 0 || s.disconnectPercentage > 100 {
+		panic(fmt.Errorf("--%s values should be between 0 and 100. Got: %d",
+			percentageFlag, s.disconnectPercentage))
 	}
 
 	err := runSimulation(numNodes, image, s)
