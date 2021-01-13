@@ -290,7 +290,9 @@ func checkMessageDelivered(wg *sync.WaitGroup, file *os.File, msg string) {
 }
 
 func sendMessage(simio sim.IO, node sim.NodeInfo, cmd []string, ready chan struct{}) {
+	defer close(ready)
 	reader, writer := io.Pipe()
+	defer writer.Close()
 	go io.Copy(os.Stdout, reader)
 
 	simio.Exec(node.Name, cmd, sim.ExecOptions{
@@ -298,8 +300,6 @@ func sendMessage(simio sim.IO, node sim.NodeInfo, cmd []string, ready chan struc
 		Stderr: writer,
 	})
 
-	writer.Close()
-	close(ready)
 }
 
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
