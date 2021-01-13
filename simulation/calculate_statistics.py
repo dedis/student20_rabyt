@@ -112,6 +112,7 @@ name_re = re.compile(r'(node[\d*])')
 node_address_re = re.compile(r'mino\[([0-9:.]*)\] is running')
 relay_re = re.compile(r'relay opened addr=([0-9:.]*) to=([0-9:.]*)')
 receive_re = re.compile(r'got \{([^#]*).*} from [Orchestrator:]*([0-9:.]*)')
+sending_unicast_re = re.compile(r'sending {([^#]*).*} to \[[Orchestrator:]*([0-9:.]*)\]')
 hop_re = re.compile(r'Forwarding \{([^#]*).*\}, previous hop: ([0-9:.]*), source: ([Orchestrator0-9:.]*), destination: \[(.*)\]')
 ORCHESTRATOR_PREFIX = 'Orchestrator:'
 
@@ -144,6 +145,10 @@ def read_logs(filename):
         if receive_re.search(line):
             msg, fr = receive_re.search(line).groups()
             this_node.receive_msg(msg)
+        if sending_unicast_re.search(line):
+            msg, to = sending_unicast_re.search(line).groups()
+            if msg not in content_to_msg:
+                Message(msg, node_addr, to)
         if hop_re.search(line):
             msg, prev, src, dests = hop_re.search(line).groups()
             dests = dests.split()
