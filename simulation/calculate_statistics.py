@@ -35,6 +35,9 @@ class Node:
             self.finalized = True
 
 
+DUMMY_NODE = Node("0.0.0.0", "BLOCK", False)
+
+
 class Message:
     def __init__(self, content: str, sender: str, receiver: str):
         assert content not in content_to_msg, 'duplicate message: ' + content
@@ -66,6 +69,10 @@ class Message:
             self.path = [self.sender]
             while self.path[-1].addr != self.receiver.addr:
                 last_addr = self.path[-1].addr
+                # message did not reach destination
+                if last_addr not in self.hops:
+                    self.path.append(DUMMY_NODE)
+                    return
                 self.path.append(addr_to_node[self.hops[last_addr]])
 
 
@@ -215,6 +222,8 @@ def main():
 
     for n in sorted(addr_to_node.values(), key=lambda n: n.name):
         # n.finalize()
+        if n == DUMMY_NODE:
+            continue
         print('{} ({}): {} open connections, {} messages received'.format(
             n.name, n.addr, len(n.connections), len(n.received_msgs)))
     for m in sorted(content_to_msg.values(), key=lambda m: m.msg):
