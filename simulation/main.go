@@ -43,7 +43,7 @@ type nodePair struct {
 	second sim.NodeInfo
 }
 
-func (s simRound) getToken(simio sim.IO, node sim.NodeInfo) ([]string, error) {
+func getToken(simio sim.IO, node sim.NodeInfo) ([]string, error) {
 	buf := new(bytes.Buffer)
 	cmd := []string{"./memcoin", "--config", "/tmp/node", "minogrpc", "token"}
 	err := simio.Exec(node.Name, cmd, sim.ExecOptions{
@@ -72,7 +72,7 @@ func executeJoin(simio sim.IO, joiningNode sim.NodeInfo,
 	)
 }
 
-func (s simRound) sendToken(simio sim.IO, joiningNode sim.NodeInfo,
+func sendToken(simio sim.IO, joiningNode sim.NodeInfo,
 	tokenNodes []sim.NodeInfo, tokens [][]string, writer io.Writer,
 	wg *sync.WaitGroup, failed chan nodePair) {
 	defer wg.Done()
@@ -166,7 +166,7 @@ func (s simRound) candidatesToDisconnect(nodes []sim.NodeInfo) ([]Link, error) {
 	return links, nil
 }
 
-func (s simRound) retryFailed(simio sim.IO, failed chan nodePair, writer io.Writer,
+func retryFailed(simio sim.IO, failed chan nodePair, writer io.Writer,
 	wg *sync.WaitGroup, errs chan error) {
 	defer wg.Done()
 	defer close(errs)
@@ -176,7 +176,7 @@ func (s simRound) retryFailed(simio sim.IO, failed chan nodePair, writer io.Writ
 		failures = append(failures, np)
 	}
 	for _, np := range failures {
-		token, err := s.getToken(simio, np.first)
+		token, err := getToken(simio, np.first)
 		if err != nil {
 			errs <- err
 		}
@@ -194,7 +194,7 @@ func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	// Exchange certs
 	tokens := make([][]string, len(nodes), len(nodes))
 	for i := 0; i < len(nodes); i++ {
-		token, err := s.getToken(simio, nodes[i])
+		token, err := getToken(simio, nodes[i])
 		if err != nil {
 			return err
 		}
@@ -204,14 +204,14 @@ func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
 	retryErrors := make(chan error)
 	var waitRetry sync.WaitGroup
 	waitRetry.Add(1)
-	go s.retryFailed(simio, failedExchangeChannel, writer, &waitRetry,
+	go retryFailed(simio, failedExchangeChannel, writer, &waitRetry,
 		retryErrors)
 
 	var wg sync.WaitGroup
 	for i := 0; i < len(nodes); i++ {
 		// The connection with previous nodes is already established
 		wg.Add(1)
-		go s.sendToken(simio, nodes[i], nodes[i+1:], tokens[i+1:], writer,
+		go sendToken(simio, nodes[i], nodes[i+1:], tokens[i+1:], writer,
 			&wg, failedExchangeChannel)
 		// all nodes joined the first node and it's enough for broadcast
 		if !s.replyAll {
@@ -264,7 +264,7 @@ func (s simRound) createMessage(text string, destinations []sim.NodeInfo) string
 	return builder.String()
 }
 
-func (s simRound) createMessageCommand(text string,
+func createSendMessageCommand(text string,
 	destinations []sim.NodeInfo) []string {
 	cmd := []string{"./memcoin", "--config", "/tmp/node", "minogrpc", "stream"}
 	for _, n := range destinations {
@@ -307,7 +307,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 
 	// Exchange messages. Destinations are all nodes but orchestrator
 	msgWithCommands := s.createMessage("Message", nodes[1:])
-	cmd := s.createMessageCommand(msgWithCommands, nodes[1:])
+	cmd := createSendMessageCommand(msgWithCommands, nodes[1:])
 	ready := make(chan struct{})
 	// TODO: can I use simio concurrently?
 	go sendMessage(simio, nodes[0], cmd, ready)
@@ -322,7 +322,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		var wg sync.WaitGroup
 		for _, log := range logFiles {
 			// skip orchestrator's log
-			if strings.Contains(log.Name(), "-" + nodes[0].Name + "-") {
+			if strings.Contains(log.Name(), "-"+nodes[0].Name+"-") {
 				continue
 			}
 			file, err := os.Open(filepath.Join(s.logsDir, log.Name()))
