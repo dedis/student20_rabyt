@@ -217,6 +217,22 @@ func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 	if !ok {
 		return nil, errors.New("No route to " + to.String())
 	}
+	// Find an alternative next hop
+	if t.isUnreachable(nextHop) {
+		for _, addr := range t.Players {
+			curId := t.addrToId(addr)
+			curPrefix := curId.AsPrefix()
+			_, isUnreachable := t.FailedHops[curPrefix]
+			if !isUnreachable && t.closerToDestination(curId, toId) {
+				// overwrite the next hop to dest with the alternative
+				t.NextHop[routingPrefix] = addr
+				return addr, nil
+			}
+		}
+		// no alternative found, delete the entry
+		delete(t.NextHop, routingPrefix)
+		return nil, errors.New("No route to " + to.String())
+	}
 	return nextHop, nil
 }
 
@@ -235,24 +251,18 @@ func (t *RoutingTable) closerToDestination(hop id.NodeID, dest id.NodeID) bool {
 	return hopPrefix.Length() > thisPrefix.Length()
 }
 
-// OnFailure implements router.RoutingTable. It changes the next hop for a
-// given destination because the provided next hop is not available.
-func (t *RoutingTable) OnFailure(dest mino.Address) error {
-	toId := t.addrToId(dest)
-	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
-	failedEntry := t.NextHop[routingPrefix]
-	t.FailedHops[t.addrToId(failedEntry).AsPrefix()] = failedEntry
-	for _, addr := range t.Players {
-		curId := t.addrToId(addr)
-		curPrefix := curId.AsPrefix()
-		_, isUnreachable := t.FailedHops[curPrefix]
-		if !isUnreachable && t.closerToDestination(curId, toId) {
-			// overwrite the next hop to dest with the alternative
-			t.NextHop[routingPrefix] = addr
-			return nil
-		}
-	}
-	// no alternative found, delete the entry
-	delete(t.NextHop, routingPrefix)
-	return fmt.Errorf("all next hops to %s are unavailable", dest.String())
+func (t* RoutingTable) isUnreachable(addr mino.Address) bool {
+	_, is := t.FailedHops[t.addrToId(addr).AsPrefix()]
+	return is
+}
+
+func (t* RoutingTable) markUnreachable(addr mino.Address) {
+	t.FailedHops[t.addrToId(addr).AsPrefix()] = addr
+}
+
+// OnFailure implements router.RoutingTable. It marks an address as unreachable
+// from this node, so that it is not chosen as next hop
+func (t *RoutingTable) OnFailure(nextHop mino.Address) error {
+	t.markUnreachable(nextHop)
+	return nil
 }
