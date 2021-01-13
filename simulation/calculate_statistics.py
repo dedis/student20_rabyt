@@ -158,7 +158,9 @@ def read_logs(filename):
                 dest = strip_orchestrator(dests[0])
                 if msg not in content_to_msg:
                     Message(msg, src, dest)
-                content_to_msg[msg].add_hop(prev, node_addr)
+                # skip the hop from server to client side of orchestrator
+                if prev != node_addr:
+                    content_to_msg[msg].add_hop(prev, node_addr)
 
 
 def guess_encoding(filename):
@@ -228,8 +230,7 @@ def main():
             n.name, n.addr, len(n.connections), len(n.received_msgs)))
     for m in sorted(content_to_msg.values(), key=lambda m: m.msg):
         m.finalize()
-        # one of the hops is always orchestrator-server -> orchestrator-client
-        hops = len(m.hops) - 1
+        hops = len(m.hops)
         print('message "{}": {} hops: {}'.format(m.msg, hops,
                                                  ' -> '.join(map(lambda n: n.name, m.path))))
     for bm in BroadcastMessage.getMessages():
