@@ -188,58 +188,6 @@ func retryFailed(simio sim.IO, failed chan nodePair, writer io.Writer,
 }
 
 func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
-	reader, writer := io.Pipe()
-	go io.Copy(os.Stdout, reader)
-
-	// Exchange certs
-	tokens := make([][]string, len(nodes), len(nodes))
-	for i := 0; i < len(nodes); i++ {
-		token, err := getToken(simio, nodes[i])
-		if err != nil {
-			return err
-		}
-		tokens[i] = token
-	}
-	failedExchangeChannel := make(chan nodePair)
-	retryErrors := make(chan error)
-	var waitRetry sync.WaitGroup
-	waitRetry.Add(1)
-	go retryFailed(simio, failedExchangeChannel, writer, &waitRetry,
-		retryErrors)
-
-	var wg sync.WaitGroup
-	for i := 0; i < len(nodes); i++ {
-		// The connection with previous nodes is already established
-		wg.Add(1)
-		go sendToken(simio, nodes[i], nodes[i+1:], tokens[i+1:], writer,
-			&wg, failedExchangeChannel)
-		// all nodes joined the first node and it's enough for broadcast
-		if !s.replyAll {
-			break
-		}
-	}
-	wg.Wait()
-	close(failedExchangeChannel)
-	waitRetry.Wait()
-
-	doubleFailures := 0
-	for err := range retryErrors {
-		fmt.Printf("Certificate exchange failed twice: %v\n", err)
-		doubleFailures++
-	}
-	if doubleFailures > 0 {
-		return fmt.Errorf("certificate exchange failed twice %d times, " +
-			"exiting", doubleFailures)
-	}
-
-	if s.disconnectBeforeOrchestratorMsg {
-		links, err := s.candidatesToDisconnect(nodes)
-		if err != nil {
-			return err
-		}
-		return disconnectLinks(simio, links, s.disconnectPercentage)
-	}
-
 	return nil
 }
 
@@ -302,7 +250,71 @@ func sendMessage(simio sim.IO, node sim.NodeInfo, cmd []string, ready chan struc
 
 }
 
+func (s simRound) exchangeCertificates(simio sim.IO,
+	nodes []sim.NodeInfo) error {
+	reader, writer := io.Pipe()
+	go io.Copy(os.Stdout, reader)
+
+	// Exchange certs
+	tokens := make([][]string, len(nodes), len(nodes))
+	for i := 0; i < len(nodes); i++ {
+		token, err := getToken(simio, nodes[i])
+		if err != nil {
+			return err
+		}
+		tokens[i] = token
+	}
+	failedExchangeChannel := make(chan nodePair)
+	retryErrors := make(chan error)
+	var waitRetry sync.WaitGroup
+	waitRetry.Add(1)
+	go retryFailed(simio, failedExchangeChannel, writer, &waitRetry,
+		retryErrors)
+
+	var wg sync.WaitGroup
+	for i := 0; i < len(nodes); i++ {
+		// The connection with previous nodes is already established
+		wg.Add(1)
+		go sendToken(simio, nodes[i], nodes[i+1:], tokens[i+1:], writer,
+			&wg, failedExchangeChannel)
+		// all nodes joined the first node and it's enough for broadcast
+		if !s.replyAll {
+			break
+		}
+	}
+	wg.Wait()
+	close(failedExchangeChannel)
+	waitRetry.Wait()
+
+	doubleFailures := 0
+	for err := range retryErrors {
+		fmt.Printf("Certificate exchange failed twice: %v\n", err)
+		doubleFailures++
+	}
+	if doubleFailures > 0 {
+		return fmt.Errorf("certificate exchange failed twice %d times, " +
+			"exiting", doubleFailures)
+	}
+
+	return nil
+}
+
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
+	err := s.exchangeCertificates(simio, nodes)
+	if err != nil {
+		return err
+	}
+
+	if s.disconnectBeforeOrchestratorMsg {
+		links, err := s.candidatesToDisconnect(nodes)
+		if err != nil {
+			return err
+		}
+		err = disconnectLinks(simio, links, s.disconnectPercentage)
+		if err != nil {
+			return err
+		}
+	}
 	fmt.Printf("Orchestrator is: %s at %s\n", nodes[0].Name, nodes[0].Address)
 
 	// Exchange messages. Destinations are all nodes but orchestrator
