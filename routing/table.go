@@ -26,8 +26,8 @@ type RoutingTable struct {
 	thisAddress mino.Address
 	NextHop     map[id.Prefix]mino.Address
 	// map from the prefix representation of address to the address
-	FailedHops	map[id.Prefix]mino.Address
-	Players     []mino.Address
+	FailedHops map[id.Prefix]mino.Address
+	Players    []mino.Address
 }
 
 // Router implements router.Router
@@ -36,6 +36,8 @@ type Router struct {
 	hsFac        router.HandshakeFactory
 	routingTable router.RoutingTable
 }
+
+const defaultNumHops = 5
 
 // NewRouter returns a new router.
 func NewRouter(f mino.AddressFactory) *Router {
@@ -81,7 +83,7 @@ func (r *Router) New(players mino.Players, thisAddress mino.Address) (
 		addrs = append(addrs, thisAddress)
 	}
 
-	base, length := id.BaseAndLenFromPlayers(len(addrs))
+	base, length := id.BaseAndLenFromPlayers(addrs, defaultNumHops)
 	table, err := NewTable(addrs, id.NewArrayNodeID(thisAddress, base,
 		length), thisAddress)
 	if err != nil {
@@ -125,6 +127,8 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 		}
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
 		if otherId.Equals(thisId) {
+			dela.Logger.Error().Msgf("id collision: id %s for addresses %s"+
+				" and %s", thisId, thisAddress.String(), address.String())
 			return nil, fmt.Errorf("id collision: id %s for addresses %s"+
 				" and %s", thisId, thisAddress.String(), address.String())
 		}
@@ -162,9 +166,12 @@ func (t *RoutingTable) Make(src mino.Address, to []mino.Address,
 // that should be sent to the distant peer when opening a relay to it.
 // The peer will then generate its own routing table based on the handshake.
 func (t *RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
-	base, length := id.BaseAndLenFromPlayers(len(t.Players))
-	return handshake.Handshake{IdBase: base, IdLength: length,
-		ThisAddress: to, Addresses: t.Players}
+	return handshake.Handshake{
+		IdBase:      t.thisNode.Base(),
+		IdLength:    t.thisNode.Length(),
+		ThisAddress: to,
+		Addresses:   t.Players,
+	}
 }
 
 func String(addrs []mino.Address) string {
@@ -291,12 +298,12 @@ func (t *RoutingTable) closerToDestination(hop id.NodeID, dest id.NodeID) bool {
 	return hopPrefix.Length() > thisPrefix.Length()
 }
 
-func (t* RoutingTable) isUnreachable(addr mino.Address) bool {
+func (t *RoutingTable) isUnreachable(addr mino.Address) bool {
 	_, is := t.FailedHops[t.addrToId(addr).AsPrefix()]
 	return is
 }
 
-func (t* RoutingTable) markUnreachable(addr mino.Address) {
+func (t *RoutingTable) markUnreachable(addr mino.Address) {
 	t.FailedHops[t.addrToId(addr).AsPrefix()] = addr
 }
 

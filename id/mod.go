@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"go.dedis.ch/dela/mino"
+	"math"
 	"math/big"
 )
 
@@ -19,9 +20,62 @@ type NodeID interface {
 	CommonPrefixAndFirstDifferentDigit(other NodeID) (StringPrefix, error)
 }
 
-// TODO: calculate these parameters from the number of players
-func BaseAndLenFromPlayers(numPlayers int) (byte, int) {
-	return 16, 5
+// by birthday paradox, collision probability ≈ e ^ (-n^2 / (base^length)),
+// therefore base = (n ^ 2 / log probability) ^ (1 / length)
+func getBase(numIds int, idLength int, collisionProb float64) int {
+	return int(math.Ceil(
+		math.Pow(
+			-math.Log(collisionProb)/
+				math.Pow(float64(numIds), 2),
+			1.0/float64(idLength))))
+}
+
+func hasIdCollisions(addresses []mino.Address, idBase byte, idLength int) bool {
+	addrSet := make(map[string]bool)
+	idSet := make(map[Prefix]bool)
+	for _, addr := range addresses {
+		marshalled, err := addr.MarshalText()
+		// Do not recognize an address with the same hostname as different
+		// addresses based on role, which is encoded in the first byte
+		// See a complete explanation in comments to hash()
+		addrText := string(marshalled[1:])
+		if err != nil {
+			continue
+		}
+		_, duplicateAddr := addrSet[addrText]
+		if duplicateAddr {
+			continue
+		}
+		addrSet[addrText] = true
+
+		id := NewArrayNodeID(addr, idBase, idLength).AsPrefix()
+		_, duplicateId := idSet[id]
+		if duplicateId {
+			return true
+		}
+		idSet[id] = true
+	}
+	return false
+}
+
+func BaseAndLenFromPlayers(addrs []mino.Address, hopsHint int) (byte, int) {
+	idLength := hopsHint
+	startingCollisionProbability := 0.2
+	base := getBase(len(addrs), idLength, startingCollisionProbability)
+	// increase id length if base does not fit in byte
+	for ; base > math.MaxUint8; idLength++ {
+		base = getBase(len(addrs), idLength, startingCollisionProbability)
+	}
+	// increase id base until there are no id collisions
+	for ; hasIdCollisions(addrs, byte(base), idLength); {
+		if base == math.MaxUint8 {
+			idLength += 1
+			base = getBase(len(addrs), idLength, startingCollisionProbability)
+		} else {
+			base++
+		}
+	}
+	return byte(base), idLength
 }
 
 type ArrayNodeID struct {
