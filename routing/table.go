@@ -252,6 +252,8 @@ func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
 	nextHop, ok := t.NextHop[routingPrefix]
 	if !ok {
+		dela.Logger.Warn().Stringer("to", to).Msgf("%s: no entry for %s",
+			t.thisNode.AsPrefix().Digits, routingPrefix.Digits)
 		return nil, errors.New("No route to " + to.String())
 	}
 	// Find an alternative next hop
@@ -268,6 +270,7 @@ func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 		}
 		// no alternative found, delete the entry
 		delete(t.NextHop, routingPrefix)
+		dela.Logger.Warn().Msg("did not find any alternative")
 		return nil, errors.New("No route to " + to.String())
 	}
 	return nextHop, nil
