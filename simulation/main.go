@@ -38,10 +38,15 @@ type simRound struct {
 	logsDir string
 }
 
+type nodePair struct {
+	first  sim.NodeInfo
+	second sim.NodeInfo
+}
+
 func (s simRound) getToken(simio sim.IO, node sim.NodeInfo) ([]string, error) {
 	buf := new(bytes.Buffer)
-	err := simio.Exec(node.Name, []string{"./memcoin", "--config",
-		"/tmp/node", "minogrpc", "token"}, sim.ExecOptions{
+	cmd := []string{"./memcoin", "--config", "/tmp/node", "minogrpc", "token"}
+	err := simio.Exec(node.Name, cmd, sim.ExecOptions{
 		Stdout: buf,
 	})
 	if err != nil {
@@ -51,35 +56,34 @@ func (s simRound) getToken(simio sim.IO, node sim.NodeInfo) ([]string, error) {
 	return token, nil
 }
 
-func (s simRound) sendToken(simio sim.IO, from sim.NodeInfo,
-	to []sim.NodeInfo) error {
-	reader, writer := io.Pipe()
-
-	go io.Copy(os.Stdout, reader)
-
-	token, err := s.getToken(simio, from)
-	if err != nil {
-		return err
-	}
+func executeJoin(simio sim.IO, joiningNode sim.NodeInfo,
+	tokenNode sim.NodeInfo, token []string, writer io.Writer) error {
 	tokenCmd := []string{
 		"./memcoin", "--config", "/tmp/node", "minogrpc", "join",
-		"--address", fmt.Sprintf("%s:2000", from.Address)}
+		"--address", fmt.Sprintf("%s:2000", tokenNode.Address)}
 	tokenCmd = append(tokenCmd, token...)
+	return simio.Exec(
+		joiningNode.Name,
+		tokenCmd,
+		sim.ExecOptions{
+			Stdout: writer,
+			Stderr: writer,
+		},
+	)
+}
 
-	for _, toNode := range to {
-		err := simio.Exec(
-			toNode.Name,
-			tokenCmd,
-			sim.ExecOptions{
-				Stdout: writer,
-				Stderr: writer,
-			},
-		)
+func (s simRound) sendToken(simio sim.IO, joiningNode sim.NodeInfo,
+	tokenNodes []sim.NodeInfo, tokens [][]string, writer io.Writer,
+	wg *sync.WaitGroup, failed chan nodePair) {
+	defer wg.Done()
+
+	for i := 0; i < len(tokenNodes); i++ {
+		err := executeJoin(simio, joiningNode, tokenNodes[i], tokens[i], writer)
 		if err != nil {
-			return err
+			writer.Write([]byte(fmt.Sprintf("error joining: %v\n", err)))
+			failed <- nodePair{tokenNodes[i], joiningNode}
 		}
 	}
-	return nil
 }
 
 type Link struct {
@@ -162,20 +166,70 @@ func (s simRound) candidatesToDisconnect(nodes []sim.NodeInfo) ([]Link, error) {
 	return links, nil
 }
 
-func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
-	// Exchange certs
-	err := s.sendToken(simio, nodes[0], nodes[1:])
-	if err != nil {
-		return err
+func (s simRound) retryFailed(simio sim.IO, failed chan nodePair, writer io.Writer,
+	wg *sync.WaitGroup, errs chan error) {
+	defer wg.Done()
+	defer close(errs)
+
+	failures := make([]nodePair, 0)
+	for np := range failed {
+		failures = append(failures, np)
 	}
-	// everyone has to exchange certs with everyone
-	if s.replyAll {
-		for i := 1; i < len(nodes)-1; i++ {
-			err := s.sendToken(simio, nodes[i], nodes[i+1:])
-			if err != nil {
-				return err
-			}
+	for _, np := range failures {
+		token, err := s.getToken(simio, np.first)
+		if err != nil {
+			errs <- err
 		}
+		err = executeJoin(simio, np.second, np.first, token, writer)
+		if err != nil {
+			errs <- err
+		}
+	}
+}
+
+func (s simRound) Before(simio sim.IO, nodes []sim.NodeInfo) error {
+	reader, writer := io.Pipe()
+	go io.Copy(os.Stdout, reader)
+
+	// Exchange certs
+	tokens := make([][]string, len(nodes), len(nodes))
+	for i := 0; i < len(nodes); i++ {
+		token, err := s.getToken(simio, nodes[i])
+		if err != nil {
+			return err
+		}
+		tokens[i] = token
+	}
+	failedExchangeChannel := make(chan nodePair)
+	retryErrors := make(chan error)
+	var waitRetry sync.WaitGroup
+	waitRetry.Add(1)
+	go s.retryFailed(simio, failedExchangeChannel, writer, &waitRetry,
+		retryErrors)
+
+	var wg sync.WaitGroup
+	for i := 0; i < len(nodes); i++ {
+		// The connection with previous nodes is already established
+		wg.Add(1)
+		go s.sendToken(simio, nodes[i], nodes[i+1:], tokens[i+1:], writer,
+			&wg, failedExchangeChannel)
+		// all nodes joined the first node and it's enough for broadcast
+		if !s.replyAll {
+			break
+		}
+	}
+	wg.Wait()
+	close(failedExchangeChannel)
+	waitRetry.Wait()
+
+	doubleFailures := 0
+	for err := range retryErrors {
+		fmt.Printf("Certificate exchange failed twice: %v\n", err)
+		doubleFailures++
+	}
+	if doubleFailures > 0 {
+		return fmt.Errorf("certificate exchange failed twice %d times, " +
+			"exiting", doubleFailures)
 	}
 
 	if s.disconnectBeforeOrchestratorMsg {
