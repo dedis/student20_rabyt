@@ -243,11 +243,12 @@ func sendMessage(simio sim.IO, node sim.NodeInfo, cmd []string, ready chan struc
 	defer writer.Close()
 	go io.Copy(os.Stdout, reader)
 
+	fmt.Println("orchestrator broadcasts the message and waits for replies")
 	simio.Exec(node.Name, cmd, sim.ExecOptions{
 		Stdout: writer,
 		Stderr: writer,
 	})
-
+	fmt.Println("orchestrator done")
 }
 
 func (s simRound) exchangeCertificates(simio sim.IO,
@@ -304,6 +305,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("finished certificate exchange")
 
 	if s.disconnectBeforeOrchestratorMsg {
 		links, err := s.candidatesToDisconnect(nodes)
@@ -314,8 +316,8 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		if err != nil {
 			return err
 		}
+		fmt.Println("disconnected links")
 	}
-	fmt.Printf("Orchestrator is: %s at %s\n", nodes[0].Name, nodes[0].Address)
 
 	// Exchange messages. Destinations are all nodes but orchestrator
 	msgWithCommands := s.createMessage("Message", nodes[1:])
@@ -345,6 +347,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 			wg.Add(1)
 			go checkMessageDelivered(&wg, file, msgWithCommands)
 		}
+		fmt.Println("waiting for broadcast message to arrive to followers")
 		wg.Wait()
 
 		links, err := s.candidatesToDisconnect(nodes)
