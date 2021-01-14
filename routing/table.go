@@ -282,6 +282,7 @@ func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 				t.nextHopLock.Lock()
 				t.NextHop[routingPrefix] = addr
 				t.nextHopLock.Unlock()
+				dela.Logger.Info().Msg("found an alternate next hop")
 				return addr, nil
 			}
 		}
