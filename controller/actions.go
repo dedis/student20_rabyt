@@ -163,7 +163,7 @@ func (s streamAction) Execute(req node.Context) error {
 	dela.Logger.Info().Msgf("sending %s to %v", msg, addresses[1:])
 	err := <-sender.Send(exampleMessage{value: msg}, addresses[1:]...)
 	if err != nil {
-		return xerrors.Errorf("error sending message: %v", err)
+		dela.Logger.Error().Msgf("error sending message: %v", err)
 	}
 
 	quit := make(chan struct{})
@@ -171,7 +171,8 @@ func (s streamAction) Execute(req node.Context) error {
 		go func() {
 			tick := time.Tick(100 * time.Millisecond)
 			counter := 0
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(),
+				10 * time.Minute)
 			defer cancel()
 			for {
 				select {
