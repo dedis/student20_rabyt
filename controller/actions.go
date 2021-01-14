@@ -194,6 +194,8 @@ func (s streamAction) Execute(req node.Context) error {
 					counter++
 					// Exit after receiving enough messages
 					if counter == len(addresses)-1 {
+						dela.Logger.Info().Msg("received all messages, " +
+							"returning")
 						quit <- struct{}{}
 						return
 					}
