@@ -8,11 +8,11 @@ import (
 	"github.com/hpcloud/tail"
 	"go.dedis.ch/simnet/sim/kubernetes"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -243,29 +243,32 @@ func checkMessageDelivered(wg *sync.WaitGroup, filename string, msg string) {
 	}
 }
 
-func checkSentCount(wg *sync.WaitGroup, filename string,
-	orchestratorText string, expectedCount int) {
+func checkSentCount(wg *sync.WaitGroup, filename string, orchestratorText string, expectedCount int, mightBeDisconnected bool) {
 	defer wg.Done()
 
-	file, err := os.Open(filename)
-	if err != nil {
-		return
-	}
-	scanner := bufio.NewScanner(file)
-	receivedFromOrchestrator := false
-	lines := 0
-	for scanner.Scan() {
-		lines++
-		text := scanner.Text()
-		if strings.Contains(text, "got") && strings.Contains(text,
-			orchestratorText) {
-			receivedFromOrchestrator = true
+	// a node does not send messages if it never received the message from the
+	// orchestrator
+	if mightBeDisconnected {
+		file, err := os.Open(filename)
+		if err != nil {
+			return
 		}
-	}
-	if !receivedFromOrchestrator {
-		fmt.Printf("%s did not receive the message from orchestrator"+
-			" (Message#)\n", filename)
-		return
+		scanner := bufio.NewScanner(file)
+		receivedFromOrchestrator := false
+		lines := 0
+		for scanner.Scan() {
+			lines++
+			text := scanner.Text()
+			if strings.Contains(text, "got") && strings.Contains(text,
+				orchestratorText) {
+				receivedFromOrchestrator = true
+			}
+		}
+		if !receivedFromOrchestrator {
+			fmt.Printf("%s did not receive the message from orchestrator"+
+				" (Message#)\n", filename)
+			return
+		}
 	}
 
 	for {
@@ -279,7 +282,6 @@ func checkSentCount(wg *sync.WaitGroup, filename string,
 				cnt++
 			}
 			if cnt == expectedCount {
-				fmt.Printf("%s sent %d messages\n", file.Name(), expectedCount)
 				return
 			}
 		}
@@ -348,15 +350,20 @@ func (s simRound) exchangeCertificates(simio sim.IO,
 	return nil
 }
 
+func (s simRound) grepLogs(pattern string) []byte {
+	res, _ := exec.Command("grep", "-r", pattern, s.logsDir).Output()
+	return res
+}
+
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	if s.noCerts {
-		fmt.Println("skipping certificate exchange")
+		fmt.Println("skipping certificate exchange", time.Now())
 	} else {
 		err := s.exchangeCertificates(simio, nodes)
 		if err != nil {
 			return err
 		}
-		fmt.Println("finished certificate exchange")
+		fmt.Println("finished certificate exchange", time.Now())
 	}
 
 	if s.disconnectBeforeOrchestratorMsg {
@@ -379,27 +386,16 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	if s.disconnectAfterOrchestratorMsg {
 		// wait until the message from the orchestrator is delivered to all
 		// nodes
-		logFiles, err := ioutil.ReadDir(s.logsDir)
-		if err != nil {
-			return fmt.Errorf("error reading log directory: %w", err)
-		}
-		var wg sync.WaitGroup
-		for _, log := range logFiles {
-			// skip orchestrator's log
-			if strings.Contains(log.Name(), "-"+nodes[0].Name+"-") {
-				continue
-			}
-			filename := filepath.Join(s.logsDir, log.Name())
-			_, err := os.Open(filename)
-			if err != nil {
-				return fmt.Errorf("error reading a log file %s: %w",
-					log.Name(), err)
-			}
-			wg.Add(1)
-			go checkMessageDelivered(&wg, filename, msgWithCommands)
-		}
 		fmt.Println("waiting for broadcast message to arrive to followers")
-		wg.Wait()
+		for {
+			receivedLines := s.grepLogs("got {" + msgWithCommands)
+			receivedCnt := strings.Count(string(receivedLines), "\n")
+
+			if receivedCnt == len(nodes) - 1 {
+				break;
+			}
+		}
+		fmt.Println("broadcast message arrived at", time.Now())
 
 		links, err := s.candidatesToDisconnect(nodes)
 		if err != nil {
@@ -411,35 +407,56 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		}
 	}
 
-	// wait for the orchestrator's message to arrive
-	time.Sleep(time.Minute)
-	fmt.Println("Assuming orchestrator's message is delivered at time ", time.Now())
-	// wait until all nodes send their replies
-	logFiles, err := ioutil.ReadDir(s.logsDir)
-	if err != nil {
-		return fmt.Errorf("error reading log directory: %w", err)
-	}
-	var wg sync.WaitGroup
 	expectedSend := 1
 	if s.replyAll {
 		// except self
 		expectedSend = len(nodes) - 1
 	}
-	for _, log := range logFiles {
-		// skip orchestrator's log
-		if strings.Contains(log.Name(), "-"+nodes[0].Name+"-") {
-			continue
-		}
-		filename := filepath.Join(s.logsDir, log.Name())
-		wg.Add(1)
-		go checkSentCount(&wg, filename, msgWithCommands, expectedSend)
-	}
+	// each follower sends a message to everyone but itself
+	expectedSends := expectedSend * (len(nodes) - 1)
 	fmt.Println("waiting for messages to be sent")
-	wg.Wait()
-	fmt.Println("all messages are sent")
-	// wait for messages to propagate
-	time.Sleep(time.Minute)
+	unreachableAddrsRe := regexp.MustCompile(
+		"Failed to route {" + msgWithCommands + `} to \[(([0-9.:]*) ?)*\]`)
+	reachableAddrs := 0
+	for {
+		failedRouting := s.grepLogs("Failed to route {Message#")
+		unreachableAddrs := 0
+		for _, match := range unreachableAddrsRe.FindAllSubmatch(
+			failedRouting, -1) {
+			// first entry is the entire match, the rest are addresses
+			unreachableAddrs += len(match) - 1
+		}
+		// all nodes except the orchestrator and those which did not receive
+		// the message
+		reachableAddrs = len(nodes) - 1 - unreachableAddrs
+		expectedSends = expectedSend * reachableAddrs
 
+		sendLines := s.grepLogs("sending {")
+		sendCount := strings.Count(string(sendLines), "\n")
+		// subtract orchestrator's broadcast
+		if (sendCount - 1) == expectedSends {
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
+	fmt.Println("all messages are sent at", time.Now())
+	fmt.Printf("waiting for %d messages to arrive\n", expectedSends)
+	// wait for replies of all nodes to arrive
+	for {
+		// only counting received replies. All replies start with node's address
+		receivedLines := s.grepLogs("got {1")
+		receivedCnt := strings.Count(string(receivedLines), "\n")
+
+		// only counting failed replies. All replies start with node's address
+		failedLines := s.grepLogs("Failed to route {1")
+		failedCnt := strings.Count(string(failedLines), "\n")
+
+		if receivedCnt + failedCnt == expectedSends {
+			break;
+		}
+		time.Sleep(20 * time.Second)
+	}
+	fmt.Println("all messages arrived or failed at", time.Now())
 	return nil
 }
 
