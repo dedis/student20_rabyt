@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"go.dedis.ch/dela/mino"
+	"math"
 	"math/big"
 )
 
@@ -13,8 +14,67 @@ type NodeID interface {
 	Base() byte
 	GetDigit(pos int) byte
 	Equals(other NodeID) bool
+	AsBigInt() *big.Int
+	AsPrefix() Prefix
 	CommonPrefix(other NodeID) (Prefix, error)
 	CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, error)
+}
+
+// by birthday paradox, collision probability ≈ e ^ (-n^2 / (base^length)),
+// therefore base = (n ^ 2 / log probability) ^ (1 / length)
+func getBase(numIds int, idLength int, collisionProb float64) int {
+	return int(math.Ceil(
+		math.Pow(
+			-math.Log(collisionProb)/
+				math.Pow(float64(numIds), 2),
+			1.0/float64(idLength))))
+}
+
+func hasIdCollisions(addresses []mino.Address, idBase byte, idLength int) bool {
+	addrSet := make(map[string]bool)
+	idSet := make(map[Prefix]bool)
+	for _, addr := range addresses {
+		marshalled, err := addr.MarshalText()
+		// Do not recognize an address with the same hostname as different
+		// addresses based on role, which is encoded in the first byte
+		// See a complete explanation in comments to hash()
+		addrText := string(marshalled[1:])
+		if err != nil {
+			continue
+		}
+		_, duplicateAddr := addrSet[addrText]
+		if duplicateAddr {
+			continue
+		}
+		addrSet[addrText] = true
+
+		id := NewArrayNodeID(addr, idBase, idLength).AsPrefix()
+		_, duplicateId := idSet[id]
+		if duplicateId {
+			return true
+		}
+		idSet[id] = true
+	}
+	return false
+}
+
+func BaseAndLenFromPlayers(addrs []mino.Address, hopsHint int) (byte, int) {
+	idLength := hopsHint
+	base := getBase(len(addrs), idLength, 0.05)
+	// increase id length if base does not fit in byte
+	for ; base > math.MaxUint8; idLength++ {
+		base = getBase(len(addrs), idLength, 0.05)
+	}
+	// increase id base until there are no id collisions
+	for ; hasIdCollisions(addrs, byte(base), idLength); {
+		if base == math.MaxUint8 {
+			idLength += 1
+			base = getBase(len(addrs), idLength, 0.05)
+		} else {
+			base++
+		}
+	}
+	return byte(base), idLength
 }
 
 type ArrayNodeID struct {
@@ -73,6 +133,15 @@ func (id ArrayNodeID) Equals(other NodeID) bool {
 	}
 }
 
+func (id ArrayNodeID) AsBigInt() *big.Int {
+	return byteArrayToBigInt(id.id)
+}
+
+func (id ArrayNodeID) AsPrefix() Prefix {
+	prefix, _ := id.CommonPrefix(id)
+	return prefix
+}
+
 // CommonPrefix calculates a common prefix of two ids. Returns an error if
 // bases or lengths of the ids are different.
 func (id ArrayNodeID) CommonPrefix(other NodeID) (Prefix, error) {
@@ -87,7 +156,7 @@ func (id ArrayNodeID) CommonPrefix(other NodeID) (Prefix, error) {
 		if id.GetDigit(i) != other.GetDigit(i) {
 			break
 		}
-		prefix = id.id[0:i+1]
+		prefix = id.id[0 : i+1]
 	}
 	return StringPrefix{string(prefix), id.Base()}, nil
 }
