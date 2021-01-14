@@ -270,20 +270,14 @@ const (
 	AddressSeparator = ","
 )
 
-func appendError(acc error, current error) error {
-	if current == nil {
-		return acc
-	}
-	if acc == nil {
-		return current
-	}
-
-	return fmt.Errorf("%s, %s", acc.Error(), current.Error())
+func (h exampleHandler) send(sender mino.Sender, reply string, addr string) {
+	currErr := <-sender.Send(exampleMessage{reply}, session.NewAddress(addr))
+	dela.Logger.Warn().Err(currErr).Msgf(
+		"error when sending a message {%s} to %s", reply, addr)
 }
 
 func (h exampleHandler) replyMultiple(msgFormat string, addrs string,
-	sender mino.Sender) error {
-	var err error = nil
+	sender mino.Sender) {
 	for _, addr := range strings.Split(addrs, AddressSeparator) {
 		toAddr := session.NewAddress(addr)
 		// do not send the message to self
@@ -291,12 +285,8 @@ func (h exampleHandler) replyMultiple(msgFormat string, addrs string,
 			continue
 		}
 		reply := fmt.Sprintf(msgFormat, addr)
-		currErr := <-sender.Send(exampleMessage{reply}, session.NewAddress(addr))
-
-		// combine the errors instead of returning on the first error
-		err = appendError(err, currErr)
+		go h.send(sender, reply, addr)
 	}
-	return err
 }
 
 func (h exampleHandler) processMessage(from mino.Address, msg serde.Message,
@@ -320,7 +310,6 @@ func (h exampleHandler) processMessage(from mino.Address, msg serde.Message,
 		time.Sleep(30 * time.Second)
 	}
 
-	var err error = nil
 	// the message to all participants has to include NoReply
 	// to avoid infinite message exchange
 	replyFormat := fmt.Sprintf(
@@ -329,7 +318,7 @@ func (h exampleHandler) processMessage(from mino.Address, msg serde.Message,
 	if strings.Contains(command, ReplyAllCommand) {
 		addrStart := strings.Index(command, ReplyAllCommand) +
 			len(ReplyAllCommand)
-		err = h.replyMultiple(replyFormat, command[addrStart:], sender)
+		h.replyMultiple(replyFormat, command[addrStart:], sender)
 	}
 
 	// Reply the sender (the sender either includes NoReply or is the
@@ -337,10 +326,10 @@ func (h exampleHandler) processMessage(from mino.Address, msg serde.Message,
 	// Sleep before the reply to allow (potential) replyAll messages to arrive
 	time.Sleep(time.Second)
 	reply := fmt.Sprintf(replyFormat, from)
-	currErr := <-sender.Send(exampleMessage{reply}, from)
-	err = appendError(err, currErr)
+	err := <-sender.Send(exampleMessage{reply}, from)
 	if err != nil {
-		dela.Logger.Error().Err(err)
+		dela.Logger.Warn().Err(err).Msgf(
+			"error when sending a message {%s} to orchestrator %s", reply, from)
 	}
 }
 
