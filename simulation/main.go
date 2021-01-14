@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"github.com/hpcloud/tail"
 	"go.dedis.ch/simnet/sim/kubernetes"
 	"io"
 	"io/ioutil"
@@ -223,10 +224,14 @@ func createSendMessageCommand(text string,
 	return append(cmd, []string{"--message", text}...)
 }
 
-func checkMessageDelivered(wg *sync.WaitGroup, file *os.File, msg string) {
+func checkMessageDelivered(wg *sync.WaitGroup, filename string, msg string) {
 	defer wg.Done()
 
 	for {
+		file, err := os.Open(filename)
+		if err != nil {
+			return
+		}
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			text := scanner.Text()
@@ -238,8 +243,50 @@ func checkMessageDelivered(wg *sync.WaitGroup, file *os.File, msg string) {
 	}
 }
 
-func sendMessage(simio sim.IO, node sim.NodeInfo, cmd []string, ready chan struct{}) {
-	defer close(ready)
+func checkSentCount(wg *sync.WaitGroup, filename string,
+	orchestratorText string, expectedCount int) {
+	defer wg.Done()
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return
+	}
+	scanner := bufio.NewScanner(file)
+	receivedFromOrchestrator := false
+	lines := 0
+	for scanner.Scan() {
+		lines++
+		text := scanner.Text()
+		if strings.Contains(text, "got") && strings.Contains(text,
+			orchestratorText) {
+			receivedFromOrchestrator = true
+		}
+	}
+	if !receivedFromOrchestrator {
+		fmt.Printf("%s did not receive the message from orchestrator"+
+			" (Message#)\n", filename)
+		return
+	}
+
+	for {
+		cnt := 0
+		t, err := tail.TailFile(filename, tail.Config{Follow: true})
+		if err != nil {
+			fmt.Println(err)
+		}
+		for line := range t.Lines {
+			if strings.Contains(line.Text, "sending {") {
+				cnt++
+			}
+			if cnt == expectedCount {
+				fmt.Printf("%s sent %d messages\n", file.Name(), expectedCount)
+				return
+			}
+		}
+	}
+}
+
+func sendMessage(simio sim.IO, node sim.NodeInfo, cmd []string) {
 	reader, writer := io.Pipe()
 	defer writer.Close()
 	go io.Copy(os.Stdout, reader)
@@ -327,9 +374,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 	// Exchange messages. Destinations are all nodes but orchestrator
 	msgWithCommands := s.createMessage("Message", nodes[1:])
 	cmd := createSendMessageCommand(msgWithCommands, nodes[1:])
-	ready := make(chan struct{})
-	// TODO: can I use simio concurrently?
-	go sendMessage(simio, nodes[0], cmd, ready)
+	go sendMessage(simio, nodes[0], cmd)
 
 	if s.disconnectAfterOrchestratorMsg {
 		// wait until the message from the orchestrator is delivered to all
@@ -344,13 +389,14 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 			if strings.Contains(log.Name(), "-"+nodes[0].Name+"-") {
 				continue
 			}
-			file, err := os.Open(filepath.Join(s.logsDir, log.Name()))
+			filename := filepath.Join(s.logsDir, log.Name())
+			_, err := os.Open(filename)
 			if err != nil {
 				return fmt.Errorf("error reading a log file %s: %w",
 					log.Name(), err)
 			}
 			wg.Add(1)
-			go checkMessageDelivered(&wg, file, msgWithCommands)
+			go checkMessageDelivered(&wg, filename, msgWithCommands)
 		}
 		fmt.Println("waiting for broadcast message to arrive to followers")
 		wg.Wait()
@@ -365,7 +411,35 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		}
 	}
 
-	<-ready
+	// wait for the orchestrator's message to arrive
+	time.Sleep(time.Minute)
+	fmt.Println("Assuming orchestrator's message is delivered at time ", time.Now())
+	// wait until all nodes send their replies
+	logFiles, err := ioutil.ReadDir(s.logsDir)
+	if err != nil {
+		return fmt.Errorf("error reading log directory: %w", err)
+	}
+	var wg sync.WaitGroup
+	expectedSend := 1
+	if s.replyAll {
+		// except self
+		expectedSend = len(nodes) - 1
+	}
+	for _, log := range logFiles {
+		// skip orchestrator's log
+		if strings.Contains(log.Name(), "-"+nodes[0].Name+"-") {
+			continue
+		}
+		filename := filepath.Join(s.logsDir, log.Name())
+		wg.Add(1)
+		go checkSentCount(&wg, filename, msgWithCommands, expectedSend)
+	}
+	fmt.Println("waiting for messages to be sent")
+	wg.Wait()
+	fmt.Println("all messages are sent")
+	// wait for messages to propagate
+	time.Sleep(time.Minute)
+
 	return nil
 }
 
