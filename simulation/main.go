@@ -476,8 +476,8 @@ func createSimOptions(numNodes int, dockerImage string) []sim.Option {
 }
 
 const (
-	TreeRoutingImage   = "katjag/dela-tree-simulation:latest"
-	PrefixRoutingImage = "katjag/prefix-routing-simulation:latest"
+	TreeRoutingImage   = "katjag/dela-tree-simulation:best-logs"
+	PrefixRoutingImage = "katjag/prefix-routing-simulation:hop-dst"
 	NaiveRoutingImage  = "katjag/naive-prefix-routing-simulation"
 )
 
