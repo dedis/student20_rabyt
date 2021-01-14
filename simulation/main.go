@@ -28,6 +28,7 @@ func init() {
 }
 
 type simRound struct {
+	noCerts                         bool
 	replyAll                        bool
 	disconnectBeforeOrchestratorMsg bool
 	disconnectAfterOrchestratorMsg  bool
@@ -293,7 +294,7 @@ func (s simRound) exchangeCertificates(simio sim.IO,
 		doubleFailures++
 	}
 	if doubleFailures > 0 {
-		return fmt.Errorf("certificate exchange failed twice %d times, " +
+		return fmt.Errorf("certificate exchange failed twice %d times, "+
 			"exiting", doubleFailures)
 	}
 
@@ -301,11 +302,15 @@ func (s simRound) exchangeCertificates(simio sim.IO,
 }
 
 func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
-	err := s.exchangeCertificates(simio, nodes)
-	if err != nil {
-		return err
+	if s.noCerts {
+		fmt.Println("skipping certificate exchange")
+	} else {
+		err := s.exchangeCertificates(simio, nodes)
+		if err != nil {
+			return err
+		}
+		fmt.Println("finished certificate exchange")
 	}
-	fmt.Println("finished certificate exchange")
 
 	if s.disconnectBeforeOrchestratorMsg {
 		links, err := s.candidatesToDisconnect(nodes)
@@ -417,6 +422,7 @@ func runSimulation(numNodes int, dockerImage string, round simRound) error {
 }
 
 const (
+	noCertsFlag          = "no-certs"
 	numNodesFlag         = "n"
 	protocolFlag         = "protocol"
 	replyAllFlag         = "replyAll"
@@ -433,6 +439,7 @@ func main() {
 	algoToImage := map[string]string{"tree": TreeRoutingImage,
 		"prefix": PrefixRoutingImage, "naive": NaiveRoutingImage}
 
+	flag.BoolVar(&s.noCerts, noCertsFlag, true, "skip certificate exchange")
 	flag.IntVar(&numNodes, numNodesFlag, 10, "the number of nodes for simulation")
 	flag.StringVar(&routingProtocol, protocolFlag, "prefix",
 		"the routing protocol: must be 'tree' or 'prefix'")
