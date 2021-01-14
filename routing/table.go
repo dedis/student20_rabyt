@@ -9,6 +9,7 @@ import (
 	"go.dedis.ch/dela/mino/router"
 	"go.dedis.ch/dela/mino/router/tree/types"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -24,8 +25,11 @@ type RoutingTable struct {
 	thisAddress mino.Address
 	NextHop     map[id.Prefix]mino.Address
 	// map from the prefix representation of address to the address
-	FailedHops	map[id.Prefix]mino.Address
-	Players     []mino.Address
+	FailedHops map[id.Prefix]mino.Address
+	Players    []mino.Address
+
+	nextHopLock    sync.RWMutex
+	failedHopsLock sync.RWMutex
 }
 
 // Router implements router.Router
@@ -121,12 +125,12 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 		}
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
 		if otherId.Equals(thisId) {
-			return nil, fmt.Errorf("id collision: id %s for addresses %s" +
+			return nil, fmt.Errorf("id collision: id %s for addresses %s"+
 				" and %s", thisId, thisAddress.String(), address.String())
 		}
 		prefix, err := otherId.CommonPrefixAndFirstDifferentDigit(thisId)
 		if err != nil {
-			return nil, fmt.Errorf("error when calculating common prefix of" +
+			return nil, fmt.Errorf("error when calculating common prefix of"+
 				" ids: %s", err.Error())
 		}
 		if _, contains := hopMap[prefix]; !contains {
@@ -134,8 +138,12 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 		}
 	}
 
-	return &RoutingTable{thisId, thisAddress, hopMap,
-		make(map[id.Prefix]mino.Address), addresses}, nil
+	return &RoutingTable{
+		thisNode:    thisId,
+		thisAddress: thisAddress,
+		NextHop:     hopMap,
+		FailedHops:  make(map[id.Prefix]mino.Address),
+		Players:     addresses}, nil
 }
 
 func randomShuffle(addresses []mino.Address) {
@@ -199,7 +207,7 @@ func (t *RoutingTable) addrToId(addr mino.Address) id.NodeID {
 func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 	// Client side of the orchestrator or the server side of the orchestrator
 	// which is the only player
-	if len(t.NextHop) == 0 {
+	if len(t.Players) == 1 {
 		return nil, nil
 	}
 	toId := t.addrToId(to)
@@ -213,7 +221,9 @@ func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
 	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
+	t.nextHopLock.RLock()
 	nextHop, ok := t.NextHop[routingPrefix]
+	t.nextHopLock.RUnlock()
 	if !ok {
 		return nil, errors.New("No route to " + to.String())
 	}
@@ -221,16 +231,18 @@ func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 	if t.isUnreachable(nextHop) {
 		for _, addr := range t.Players {
 			curId := t.addrToId(addr)
-			curPrefix := curId.AsPrefix()
-			_, isUnreachable := t.FailedHops[curPrefix]
-			if !isUnreachable && t.closerToDestination(curId, toId) {
+			if !t.isUnreachable(addr) && t.closerToDestination(curId, toId) {
 				// overwrite the next hop to dest with the alternative
+				t.nextHopLock.Lock()
 				t.NextHop[routingPrefix] = addr
+				t.nextHopLock.Unlock()
 				return addr, nil
 			}
 		}
 		// no alternative found, delete the entry
+		t.nextHopLock.Lock()
 		delete(t.NextHop, routingPrefix)
+		t.nextHopLock.Unlock()
 		return nil, errors.New("No route to " + to.String())
 	}
 	return nextHop, nil
@@ -251,12 +263,16 @@ func (t *RoutingTable) closerToDestination(hop id.NodeID, dest id.NodeID) bool {
 	return hopPrefix.Length() > thisPrefix.Length()
 }
 
-func (t* RoutingTable) isUnreachable(addr mino.Address) bool {
+func (t *RoutingTable) isUnreachable(addr mino.Address) bool {
+	t.failedHopsLock.RLock()
+	defer t.failedHopsLock.RUnlock()
 	_, is := t.FailedHops[t.addrToId(addr).AsPrefix()]
 	return is
 }
 
-func (t* RoutingTable) markUnreachable(addr mino.Address) {
+func (t *RoutingTable) markUnreachable(addr mino.Address) {
+	t.failedHopsLock.Lock()
+	defer t.failedHopsLock.Unlock()
 	t.FailedHops[t.addrToId(addr).AsPrefix()] = addr
 }
 
