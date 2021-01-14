@@ -116,20 +116,32 @@ def run_simulation(params: SimulationParams, iteration: int):
         shutil.copy(fullname, dest_log_dir)
 
 
+def run(params: SimulationParams, n: int, dropPercentage: int, replyAll: bool = None):
+    params.numNodes = n
+    params.dropPercentage = dropPercentage
+    if replyAll is not None:
+        params.replyAll = replyAll
+    for i in range(1, 4):
+        start = time.time()
+        run_simulation(params, i)
+        print('ran simulation for {} nodes, took {}'.format(n, datetime.timedelta(seconds=time.time() - start)))
+
+
 def main():
     nodes = [5, 10, 20, 30, 50, 70, 100]
+    percentages = [10, 30]
     sim_start = time.time()
     for n in nodes:
-        for i in range(1, 4):
-            defaultPrefixSimulationParams.numNodes = n
-            start = time.time()
-            run_simulation(defaultPrefixSimulationParams, i)
-            print('ran prefix simulation for {} nodes, took {}'.format(n, datetime.timedelta(seconds=time.time() - start)))
-
-            defaultTreeSimulationParams.numNodes = n
-            start = time.time()
-            run_simulation(defaultTreeSimulationParams, i)
-            print('ran tree simulation for {} nodes, took {}'.format(n, datetime.timedelta(seconds=time.time() - start)))
+        for dp in percentages:
+            for replyAll in [True, False]:
+                run(defaultPrefixSimulationParams, n, dp, replyAll)
+                run(defaultTreeSimulationParams, n, dp, replyAll)
+    connectedSimulationParams = SimulationParams('tree', 5, True, False, False, False, 0, True)
+    for n in nodes:
+        for protocol in ['prefix', 'tree']:
+            for replyAll in [True, False]:
+                connectedSimulationParams.protocol = protocol
+                run(connectedSimulationParams, n, 0, replyAll)
 
     print('\nsimulation took {}'.format(datetime.timedelta(seconds=time.time() - sim_start)))
 
