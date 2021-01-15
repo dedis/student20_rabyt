@@ -121,6 +121,15 @@ func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 	return r.routingTable, nil
 }
 
+func printLeafSet(addrs []mino.Address, someId id.NodeID) {
+	res := ""
+	for _, a := range addrs {
+		res += fmt.Sprintf("%s (%s), ", id.NewArrayNodeID(a, someId.Base(),
+			someId.Length()).AsPrefix().Digits, a.String())
+	}
+	dela.Logger.Info().Msg("current leaf set: " + res)
+}
+
 func insort(thisId id.NodeID, closestAddresses []mino.Address,
 	newAddress mino.Address, maxSize int) []mino.Address {
 	newId := id.NewArrayNodeID(newAddress, thisId.Base(), thisId.Length())
@@ -183,14 +192,14 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 				address.String(), otherId.AsPrefix().Digits)
 		}
 		closestAddrs = insort(thisId, closestAddrs, address, defaultLeafSetSize)
+		dela.Logger.Info().Msg("leafset after appending:")
+		printLeafSet(closestAddrs, thisId)
 	}
 
-	dela.Logger.Info().Msg("Computed leaf set: ")
 	leafSet := make(map[id.Prefix]mino.Address)
 	for _, addr := range closestAddrs {
 		curId := id.NewArrayNodeID(addr, thisId.Base(), thisId.Length())
 		leafSet[curId.AsPrefix()] = addr
-		dela.Logger.Info().Msgf("%s (%s)", curId.AsPrefix().Digits, addr.String())
 	}
 
 	return &RoutingTable{
@@ -399,10 +408,10 @@ func (t *RoutingTable) updateLeafSet(unavailableAddr mino.Address) {
 	}
 	leafSet := make(map[id.Prefix]mino.Address)
 	dela.Logger.Info().Msg("Recomputed leaf set: ")
+	printLeafSet(closestAddrs, t.thisNode)
 	for _, addr := range closestAddrs {
 		curId := t.addrToId(addr)
 		leafSet[curId.AsPrefix()] = addr
-		dela.Logger.Info().Msgf("%s (%s)", curId.AsPrefix().Digits, addr.String())
 	}
 
 	t.leafSetSorted = closestAddrs
