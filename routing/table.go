@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const defaultLeafSetSize = 5
+
 // RoutingTable is a prefix-based routing implementation of router.RoutingTable.
 // Each entry in the NextHop maps a prefix of this node's id (thisNode) plus
 // a differing next digit to the address, where a packet whose destination has
@@ -24,11 +26,17 @@ type RoutingTable struct {
 	thisNode    id.NodeID
 	thisAddress mino.Address
 	NextHop     map[id.Prefix]mino.Address
+	// map from the prefix representation of address to the address.
+	// Used instead of a set
+	LeafSet map[id.Prefix]mino.Address
+	// An internal sorted array of closest addresses
+	leafSetSorted []mino.Address
 	// map from the prefix representation of address to the address
 	FailedHops map[id.Prefix]mino.Address
 	Players    []mino.Address
 
 	nextHopLock    sync.RWMutex
+	leafSetLock    sync.RWMutex
 	failedHopsLock sync.RWMutex
 }
 
@@ -109,6 +117,24 @@ func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 	return r.routingTable, nil
 }
 
+func insort(thisId id.NodeID, closestAddresses []mino.Address,
+	newAddress mino.Address, maxSize int) []mino.Address {
+	newId := id.NewArrayNodeID(newAddress, thisId.Base(), thisId.Length())
+	for i, addr := range closestAddresses {
+		curId := id.NewArrayNodeID(addr, thisId.Base(), thisId.Length())
+		if thisId.CloserThan(newId, curId) {
+			tmp := append(closestAddresses[:i], newAddress)
+			// We added an address, therefore the last (fahrthest) address
+			// is not among maxSize closest
+			return append(tmp, closestAddresses[i:maxSize-1]...)
+		}
+	}
+	if len(closestAddresses) < maxSize {
+		return append(closestAddresses, newAddress)
+	}
+	return closestAddresses
+}
+
 // NewTable constructs a routing table from the addresses of participating nodes.
 // It requires the id of the node, for which the routing table is constructed,
 // to calculate the common prefix of this node's id and other nodes' ids.
@@ -119,6 +145,7 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 	randomShuffle(addresses)
 
 	hopMap := make(map[id.Prefix]mino.Address)
+	closestAddrs := make([]mino.Address, 0, defaultLeafSetSize)
 	for _, address := range addresses {
 		if address.Equal(thisAddress) {
 			continue
@@ -136,14 +163,23 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 		if _, contains := hopMap[prefix]; !contains {
 			hopMap[prefix] = address
 		}
+		closestAddrs = insort(thisId, closestAddrs, address, defaultLeafSetSize)
+	}
+
+	leafSet := make(map[id.Prefix]mino.Address)
+	for _, addr := range closestAddrs {
+		curId := id.NewArrayNodeID(addr, thisId.Base(), thisId.Length())
+		leafSet[curId.AsPrefix()] = addr
 	}
 
 	return &RoutingTable{
-		thisNode:    thisId,
-		thisAddress: thisAddress,
-		NextHop:     hopMap,
-		FailedHops:  make(map[id.Prefix]mino.Address),
-		Players:     addresses}, nil
+		thisNode:      thisId,
+		thisAddress:   thisAddress,
+		NextHop:       hopMap,
+		LeafSet:       leafSet,
+		leafSetSorted: closestAddrs,
+		FailedHops:    make(map[id.Prefix]mino.Address),
+		Players:       addresses}, nil
 }
 
 func randomShuffle(addresses []mino.Address) {
@@ -218,6 +254,12 @@ func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 	if toId.Equals(t.thisNode) && !to.Equal(t.thisAddress) {
 		return nil, nil
 	}
+
+	t.leafSetLock.RLock()
+	defer t.leafSetLock.RUnlock()
+	if _, isLeaf := t.LeafSet[toId.AsPrefix()]; isLeaf {
+		return to, nil
+	}
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
 	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
@@ -266,14 +308,46 @@ func (t *RoutingTable) isUnreachable(addr mino.Address) bool {
 }
 
 func (t *RoutingTable) markUnreachable(addr mino.Address) {
+	nodeId := t.addrToId(addr)
 	t.failedHopsLock.Lock()
-	defer t.failedHopsLock.Unlock()
-	t.FailedHops[t.addrToId(addr).AsPrefix()] = addr
+	t.FailedHops[nodeId.AsPrefix()] = addr
+	t.failedHopsLock.Unlock()
+}
+
+func (t *RoutingTable) updateLeafSet(unavailableAddr mino.Address) {
+	nodeId := t.addrToId(unavailableAddr)
+	t.leafSetLock.Lock()
+	defer t.leafSetLock.Unlock()
+
+	// Already removed from leaf set
+	if _, stillLeaf := t.LeafSet[nodeId.AsPrefix()]; !stillLeaf {
+		return
+	}
+
+	// Simply recompute the leaf set.
+	// Not so expensive since it has a small constant size
+	closestAddrs := make([]mino.Address, 0, defaultLeafSetSize)
+	for _, address := range t.Players {
+		if address.Equal(t.thisAddress) || t.isUnreachable(address) {
+			continue
+		}
+		closestAddrs = insort(t.thisNode, closestAddrs, address, defaultLeafSetSize)
+	}
+	leafSet := make(map[id.Prefix]mino.Address)
+	for _, addr := range closestAddrs {
+		curId := t.addrToId(addr)
+		leafSet[curId.AsPrefix()] = addr
+	}
+
+	t.leafSetSorted = closestAddrs
+	t.LeafSet = leafSet
 }
 
 // OnFailure implements router.RoutingTable. It marks an address as unreachable
 // from this node, so that it is not chosen as next hop
 func (t *RoutingTable) OnFailure(nextHop mino.Address) error {
 	t.markUnreachable(nextHop)
+	// mark unreachable before updating the leaf set
+	t.updateLeafSet(nextHop)
 	return nil
 }
