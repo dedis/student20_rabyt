@@ -1,5 +1,6 @@
 #!/usr/bin/python3.7
 from __future__ import annotations
+from collections import namedtuple
 import encodings
 import re
 import os
@@ -9,6 +10,7 @@ LOGS_PATH = '/home/cache-nez/.config/simnet/logs'
 
 addr_to_node = {}
 content_to_msg = {}
+broadcast_messages = {}
 
 
 class Node:
@@ -46,12 +48,17 @@ class Message:
         self.receiver = receiver
         self.hops = {}
         self.path = None
+        self.delivered = False
         self.finalized = False
         content_to_msg[content] = self
 
     def add_hop(self, sender: str, receiver: str):
-        assert sender not in self.hops, 'duplicate "from" in message {{{}}} hops: from={}, to={} and {}'.format(self.msg, sender, self.hops[sender], receiver)
+        if sender in self.hops:
+            print('duplicate "from" in message {{{}}} hops: from={}, to={} and {}'.format(self.msg, sender, self.hops[sender], receiver))
+        # assert sender not in self.hops, 'duplicate "from" in message {{{}}} hops: from={}, to={} and {}'.format(self.msg, sender, self.hops[sender], receiver)
         self.hops[sender] = receiver
+        if receiver == self.receiver:
+            self.delivered = True
 
     def finalize(self):
         if not self.finalized:
@@ -68,11 +75,10 @@ class Message:
             assert self.finalized
             self.path = [self.sender]
             while self.path[-1].addr != self.receiver.addr:
-                last_addr = self.path[-1].addr
                 # message did not reach destination
-                if last_addr not in self.hops:
-                    self.path.append(DUMMY_NODE)
+                if self.path[-1] == DUMMY_NODE:
                     return
+                last_addr = self.path[-1].addr
                 self.path.append(addr_to_node[self.hops[last_addr]])
 
 
@@ -81,20 +87,20 @@ class BroadcastMessage:
 
     @staticmethod
     def getOrCreate(msg: str, sender: str):
-        if msg not in BroadcastMessage.__messages:
+        if msg not in broadcast_messages:
             BroadcastMessage(msg, sender)
-        return BroadcastMessage.__messages[msg]
+        return broadcast_messages[msg]
 
     @staticmethod
     def getMessages():
-        return BroadcastMessage.__messages.values()
+        return broadcast_messages.values()
 
     def __init__(self, msg: str, sender: str):
-        assert msg not in BroadcastMessage.__messages
+        assert msg not in broadcast_messages
         self.sender = sender
         self.message = msg
         self.hops = set()
-        BroadcastMessage.__messages[msg] = self
+        broadcast_messages[msg] = self
 
     def add_hop(self, sender: str, receiver: str):
         assert (sender, receiver) not in self.hops, 'duplicate hop: {} -> {}'.format(sender, receiver)
@@ -108,12 +114,113 @@ class BroadcastMessage:
         self.sender = addr_to_node[self.sender]
 
 
+DISCONNECT = 'disconnect'
+REPLY_ALL = 'replyAll'
+PERCENTAGE = 'percentage'
+PROTOCOL = 'protocol'
+SimulationParams = namedtuple('SimulationParams', [DISCONNECT, REPLY_ALL, PERCENTAGE, PROTOCOL])
+# maps a stat to a dict numNodes -> [value_run_1, value_run_2, value_run_3]
+Stats = namedtuple('Stats', ['openConnections', 'sent', 'delivered', 'broadcastHops', 'unicastAvgHops'])
+# dict params -> stats
+stats = {}
+
+
+def get_defaults():
+    return {DISCONNECT: False, REPLY_ALL: False, PERCENTAGE: 0, PROTOCOL: 'prefix'}
+
+
+protocol_re = re.compile(r'protocol=([a-z]*)')
+percentage_re = re.compile(r'disconnect-percentage=([0-9]*)')
+
+
+def logdir_to_params(dirname):
+    params = get_defaults()
+    if DISCONNECT in dirname:
+        params[DISCONNECT] = True
+    if REPLY_ALL in dirname:
+        params[REPLY_ALL] = True
+    if PERCENTAGE in dirname:
+        p = percentage_re.search(dirname).groups()[0]
+        params[PERCENTAGE] = int(p)
+    if PROTOCOL in dirname:
+        params[PROTOCOL] = protocol_re.search(dirname).groups()[0]
+    return SimulationParams(**params)
+
+
+def process_dir(dirname):
+    global content_to_msg
+    global broadcast_messages
+    global addr_to_node
+    params = logdir_to_params(dirname)
+    if params not in stats:
+        stats[params] = Stats({}, {}, {}, {}, {})
+    empty = True
+    for file in os.scandir(dirname):
+        if file.path.endswith('.log'):
+            empty = False
+            strip_colors(file.path)
+            read_logs(file.path)
+    if empty:
+        return False
+    # subtract dummy
+    if DUMMY_NODE.addr in addr_to_node:
+        del addr_to_node[DUMMY_NODE.addr]
+    numNodes = len(addr_to_node)
+    connections = sum(len(node.connections) for node in addr_to_node.values())
+    # unicast messages only
+    sent = len(content_to_msg)
+    delivered = sum(1 for msg in content_to_msg.values() if msg.delivered)
+    totalHops = sum(len(msg.hops) for msg in content_to_msg.values() if msg.delivered)
+    bm = list(broadcast_messages.values())[0]
+    stats[params].openConnections.setdefault(numNodes, []).append(connections)
+    stats[params].broadcastHops.setdefault(numNodes, []).append(len(bm.hops) - 1)
+    stats[params].unicastAvgHops.setdefault(numNodes, []).append(totalHops / delivered)
+    stats[params].delivered.setdefault(numNodes, []).append(delivered)
+    stats[params].sent.setdefault(numNodes, []).append(sent)
+
+    # reset global state
+    content_to_msg = {}
+    addr_to_node = {}
+    broadcast_messages = {}
+    return True
+
+
+def avg(list):
+    return sum(list) / len(list)
+
+
+def calculate_all_stats(stats_dir):
+    for dir in os.scandir(stats_dir):
+        if os.path.basename(dir.path).startswith('--protocol'):
+            print('processing', os.path.basename(dir.path))
+            process_dir(dir.path)
+    for params in sorted(stats, key=lambda x: str(x)):
+        print(params)
+        for numNodes in stats[params].openConnections:
+            stats[params].openConnections[numNodes] = avg(stats[params].openConnections[numNodes])
+            stats[params].broadcastHops[numNodes] = avg(stats[params].broadcastHops[numNodes])
+            stats[params].unicastAvgHops[numNodes] = avg(stats[params].unicastAvgHops[numNodes])
+            stats[params].sent[numNodes] = avg(stats[params].sent[numNodes])
+            stats[params].delivered[numNodes] = avg(stats[params].delivered[numNodes])
+        sortedNums = list(sorted(stats[params].openConnections.keys()))
+        print('numNodes: ', sortedNums)
+        print('open connections: ', [stats[params].openConnections[n] for n in sortedNums])
+        print('avg hops: ', [stats[params].unicastAvgHops[n] for n in sortedNums])
+        print('broadcast hops: ', [stats[params].broadcastHops[n] for n in sortedNums])
+        print('sent messages: ', [stats[params].sent[n] for n in sortedNums])
+        print('delivered messages: ', [stats[params].delivered[n] for n in sortedNums])
+        print()
+
+
+
 name_re = re.compile(r'(node[\d*])')
 node_address_re = re.compile(r'mino\[([0-9:.]*)\] is running')
 relay_re = re.compile(r'relay opened addr=([0-9:.]*) to=([0-9:.]*)')
 receive_re = re.compile(r'got \{([^#]*).*} from [Orchestrator:]*([0-9:.]*)')
 sending_unicast_re = re.compile(r'sending {([^#]*).*} to \[[Orchestrator:]*([0-9:.]*)\]')
 hop_re = re.compile(r'Forwarding \{([^#]*).*\}, previous hop: ([0-9:.]*), source: ([Orchestrator0-9:.]*), destination: \[(.*)\]')
+failed_unicast_re = re.compile(r'Failed to route {([^#]*).*} to \[[Orchestrator:]*([0-9:.]*)\]')
+failed_unicast_src_re = re.compile(r'from=([0-9:.]*)')
 ORCHESTRATOR_PREFIX = 'Orchestrator:'
 
 
@@ -166,6 +273,12 @@ def read_logs(filename):
                 # skip the hop from server to client side of orchestrator
                 if prev != node_addr:
                     content_to_msg[msg].add_hop(prev, node_addr)
+        if failed_unicast_re.search(line):
+            msg, dest = failed_unicast_re.search(line).groups()
+            src = failed_unicast_src_re.search(line).groups()[0]
+            if msg not in content_to_msg:
+                Message(msg, src, dest)
+            content_to_msg[msg].add_hop(node_addr, DUMMY_NODE.addr)
 
 
 def guess_encoding(filename):
@@ -181,6 +294,8 @@ def guess_encoding(filename):
             continue
         except LookupError:
             continue
+        except UnicodeError:
+            continue
         except Exception as e:
             print('Unexpected exception when searching the encoding: {}'.format(e))
             exit(1)
@@ -194,7 +309,7 @@ ansi_colors_re = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 def strip_colors(filename):
     content = []
     enc = guess_encoding(filename)
-    assert enc is not None
+    assert enc is not None, filename
     with open(filename, encoding=enc) as inp:
         for line in inp:
             # remove color sequences
@@ -207,26 +322,23 @@ def strip_colors(filename):
             print(line, end='', file=out)
 
 
-def main():
-    for file in os.scandir(LOGS_PATH):
-        strip_colors(file.path)
-        read_logs(file.path)
-    if len(sys.argv) > 1 and sys.argv[1] == '--hops':
-        hops = set()
-        for bm in BroadcastMessage.getMessages():
-            for (src, dest) in bm.hops:
-                # add links only in one direction
-                if src != dest and (dest, src) not in hops:
-                    hops.add((src, dest))
-        for m in content_to_msg.values():
-            for src, dest in m.hops.items():
-                # add links only in one direction
-                if src != dest and (dest, src) not in hops:
-                    hops.add((src, dest))
-        for (src, dest) in hops:
-            print(addr_to_node[src].name, addr_to_node[dest].name)
-        return
+def print_used_links():
+    hops = set()
+    for bm in BroadcastMessage.getMessages():
+        for (src, dest) in bm.hops:
+            # add links only in one direction
+            if src != dest and (dest, src) not in hops:
+                hops.add((src, dest))
+    for m in content_to_msg.values():
+        for src, dest in m.hops.items():
+            # add links only in one direction
+            if src != dest and (dest, src) not in hops:
+                hops.add((src, dest))
+    for (src, dest) in hops:
+        print(addr_to_node[src].name, addr_to_node[dest].name)
 
+
+def print_full_stats():
     for n in sorted(addr_to_node.values(), key=lambda n: n.name):
         # n.finalize()
         if n == DUMMY_NODE:
@@ -235,14 +347,30 @@ def main():
             n.name, n.addr, len(n.connections), len(n.received_msgs)))
     for m in sorted(content_to_msg.values(), key=lambda m: m.msg):
         m.finalize()
-        hops = len(m.hops)
-        print('message "{}": {} hops: {}'.format(m.msg, hops,
+        print('message "{}": {} hops: {}'.format(m.msg, len(m.hops),
                                                  ' -> '.join(map(lambda n: n.name, m.path))))
     for bm in BroadcastMessage.getMessages():
         # bm.finalize()
         # first hop is always orchestrator-server -> orchestrator-client
         hops = len(bm.hops) - 1
         print('broadcast message "{}": {} hops'.format(bm.message, hops))
+
+
+def main():
+    if len(sys.argv) == 1:
+        logs_dir = LOGS_PATH
+    else:
+        stats_dir = sys.argv[1]
+        calculate_all_stats(stats_dir)
+        return
+    for file in os.scandir(logs_dir):
+        if file.path.endswith('.log'):
+            strip_colors(file.path)
+            read_logs(file.path)
+    if len(sys.argv) > 1 and sys.argv[1] == '--hops':
+        print_used_links()
+        return
+    print_full_stats()
 
 
 if __name__ == '__main__':
