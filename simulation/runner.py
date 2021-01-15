@@ -129,6 +129,8 @@ def run(params: SimulationParams, n: int, dropPercentage: int, replyAll: bool = 
 
 def main():
     nodes = [5, 10, 20, 30, 50, 70, 100]
+    for n in nodes:
+        run(defaultPrefixSimulationParams, n, 30, True)
     percentages = [10, 30]
     sim_start = time.time()
     for n in nodes:
