@@ -300,13 +300,8 @@ func (t *RoutingTable) closerToDestination(hop id.NodeID, dest id.NodeID) bool {
 	thisPrefix, _ := dest.CommonPrefix(t.thisNode)
 	hopPrefix, _ := dest.CommonPrefix(hop)
 	if hopPrefix.Length() == thisPrefix.Length() {
-		thisInt := t.thisNode.AsBigInt()
-		hopInt := hop.AsBigInt()
-		destInt := dest.AsBigInt()
-		// |dest - hop| < |dest - this|, i.e. hop is numerically closer
-		// to destination
-		return hopInt.Sub(hopInt, destInt).Cmp(
-			thisInt.Sub(thisInt, destInt)) < 0
+		// hop is closer to dest than this node
+		return dest.CloserThan(hop, t.thisNode)
 	}
 	return hopPrefix.Length() > thisPrefix.Length()
 }
