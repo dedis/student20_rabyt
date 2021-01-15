@@ -434,7 +434,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		sendLines := s.grepLogs("sending {")
 		sendCount := strings.Count(string(sendLines), "\n")
 		// subtract orchestrator's broadcast
-		if (sendCount - 1) == expectedSends {
+		if (sendCount - 1) >= expectedSends {
 			break
 		}
 		time.Sleep(10 * time.Second)
@@ -451,7 +451,7 @@ func (s simRound) Execute(simio sim.IO, nodes []sim.NodeInfo) error {
 		failedLines := s.grepLogs("Failed to route {1")
 		failedCnt := strings.Count(string(failedLines), "\n")
 
-		if receivedCnt + failedCnt == expectedSends {
+		if receivedCnt + failedCnt >= expectedSends {
 			break;
 		}
 		time.Sleep(20 * time.Second)
@@ -471,14 +471,14 @@ func createSimOptions(numNodes int, dockerImage string) []sim.Option {
 		),
 		sim.WithImage(dockerImage, nil, nil,
 			sim.NewTCP(2000)),
-		kubernetes.WithResources("20m", "20Mi"),
+		kubernetes.WithResources("30m", "20Mi"),
 	}
 }
 
 const (
 	TreeRoutingImage    = "katjag/dela-tree-simulation:best-logs"
 	PrefixRoutingImage  = "katjag/prefix-routing-simulation:hop-dst"
-	LeafSetRoutingImage = "katjag/prefix-routing-simulation:leafset"
+	LeafSetRoutingImage = "katjag/prefix-routing-simulation:leafset-logs1"
 	NaiveRoutingImage   = "katjag/naive-prefix-routing-simulation"
 )
 
