@@ -91,6 +91,8 @@ LOG_DIR = '/home/cache-nez/.config/simnet/logs/'
 
 
 def run_simulation(params: SimulationParams, iteration: int):
+    # numNodes minutes
+    timeout = params.numNodes * 60
     errors = 0
     dest_log_dir = path.join('../../simulation-logs', params.as_filename() + '-{}'.format(iteration))
     res = subprocess.run(['mkdir', '--', dest_log_dir])
@@ -100,15 +102,21 @@ def run_simulation(params: SimulationParams, iteration: int):
     print('running ./simulation', *params.as_params(), datetime.datetime.now())
     simulation_logs = path.join(dest_log_dir, 'simulation-output.txt')
     out = open(simulation_logs, 'w')
-    subprocess.run(['./simulation', *params.as_params()], stdout=out, stderr=subprocess.STDOUT)
+    try:
+        subprocess.run(['./simulation', *params.as_params()], stdout=out, stderr=subprocess.STDOUT, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        print(e)
     out.close()
     while not successful_run(simulation_logs):
-        print('error, repeating')
+        print('error, repeating', datetime.datetime.now())
         with open(path.join(dest_log_dir, 'errors' + str(errors)), 'w') as err, open(simulation_logs) as sim:
             err.write(sim.read())
             errors += 1
         out = open(simulation_logs, 'w')
-        subprocess.run(['./simulation', *params.as_params()], stdout=out, stderr=subprocess.STDOUT)
+        try:
+            subprocess.run(['./simulation', *params.as_params()], stdout=out, stderr=subprocess.STDOUT, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            print(e)
         out.close()
     # save logs from this simulation run
     for filename in listdir(LOG_DIR):
@@ -116,34 +124,33 @@ def run_simulation(params: SimulationParams, iteration: int):
         shutil.copy(fullname, dest_log_dir)
 
 
-def run(params: SimulationParams, n: int, dropPercentage: int, replyAll: bool = None):
+def run(params: SimulationParams, n: int, dropPercentage: int, replyAll: bool = None, numIterations: int = 3):
     params.numNodes = n
     params.dropPercentage = dropPercentage
     if replyAll is not None:
         params.replyAll = replyAll
-    for i in range(1, 4):
+    for i in range(1, 1 + numIterations):
         start = time.time()
         run_simulation(params, i)
         print('ran simulation for {} nodes, took {}'.format(n, datetime.timedelta(seconds=time.time() - start)))
 
 
 def main():
-    nodes = [5, 10, 20, 30, 50, 70, 100]
-    for n in nodes:
-        run(defaultPrefixSimulationParams, n, 30, True)
+    nodes = [5, 10, 20, 30, 40]
     percentages = [10, 30]
     sim_start = time.time()
-    for n in nodes:
+    for replyAll in [False, True]:
         for dp in percentages:
-            for replyAll in [True, False]:
-                run(defaultPrefixSimulationParams, n, dp, replyAll)
-                run(defaultTreeSimulationParams, n, dp, replyAll)
+            for n in nodes:
+                for protocol in ['prefix', 'tree', 'leafset']:
+                    defaultPrefixSimulationParams.protocol = protocol
+                    run(defaultPrefixSimulationParams, n, dp, replyAll)
     connectedSimulationParams = SimulationParams('tree', 5, True, False, False, False, 0, True)
     for n in nodes:
-        for protocol in ['prefix', 'tree']:
+        for protocol in ['prefix', 'leafset', 'tree']:
             for replyAll in [True, False]:
                 connectedSimulationParams.protocol = protocol
-                run(connectedSimulationParams, n, 0, replyAll)
+                run(connectedSimulationParams, n, 0, replyAll, 1)
 
     print('\nsimulation took {}'.format(datetime.timedelta(seconds=time.time() - sim_start)))
 
