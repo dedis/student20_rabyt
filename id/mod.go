@@ -185,15 +185,35 @@ func (id ArrayNodeID) CommonPrefixAndFirstDifferentDigit(other NodeID) (StringPr
 	return commonPrefix.Append(id.GetDigit(commonPrefix.Length())), nil
 }
 
+func i64Abs(n int64) int64 {
+	if n >= 0 {
+		return n
+	}
+	return -n
+}
+
+func (id ArrayNodeID) distance(other NodeID) *big.Int {
+	thisInt := id.AsBigInt().Int64()
+	otherInt := other.AsBigInt().Int64()
+	clockwise := i64Abs(thisInt - otherInt)
+	minInt := thisInt
+	if otherInt < thisInt {
+		minInt = otherInt
+	}
+	maxInt := thisInt + otherInt - minInt
+	counterclockwise := i64Abs(int64(
+		math.Pow(float64(id.base),
+		float64(id.Length()))) - maxInt + minInt)
+	if counterclockwise < clockwise {
+		return big.NewInt(counterclockwise)
+	}
+	return big.NewInt(clockwise)
+}
+
 // CloserThan returns true if the first id is closer to this id than the second,
 // false otherwise
 func (id ArrayNodeID) CloserThan(first NodeID, second NodeID) bool {
-	thisInt := id.AsBigInt()
-	firstInt := first.AsBigInt()
-	secondInt := second.AsBigInt()
-	// |this - first| < |this - second|
-	return firstInt.Sub(thisInt, firstInt).CmpAbs(
-		secondInt.Sub(thisInt, secondInt)) < 0
+	return id.distance(first).Cmp(id.distance(second)) < 0
 }
 
 // hash returns a hash of addr as big integer
