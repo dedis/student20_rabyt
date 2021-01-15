@@ -13,6 +13,9 @@ type NodeID interface {
 	Base() byte
 	GetDigit(pos int) byte
 	Equals(other NodeID) bool
+	// Returns true if first id is closer to the current than the second,
+	// false otherwise
+	CloserThan(first NodeID, second NodeID) bool
 	AsBigInt() *big.Int
 	AsPrefix() Prefix
 	CommonPrefix(other NodeID) (Prefix, error)
@@ -121,6 +124,17 @@ func (id ArrayNodeID) CommonPrefixAndFirstDifferentDigit(other NodeID) (Prefix, 
 		return nil, errors.New("ids are equal")
 	}
 	return commonPrefix.Append(id.GetDigit(commonPrefix.Length())), nil
+}
+
+// CloserThan returns true if the first id is closer to this id than the second,
+// false otherwise
+func (id ArrayNodeID) CloserThan(first NodeID, second NodeID) bool {
+	thisInt := id.AsBigInt()
+	firstInt := first.AsBigInt()
+	secondInt := second.AsBigInt()
+	// |this - first| < |this - second|
+	return firstInt.Sub(thisInt, firstInt).CmpAbs(
+		secondInt.Sub(thisInt, secondInt)) < 0
 }
 
 // hash returns a hash of addr as big integer
