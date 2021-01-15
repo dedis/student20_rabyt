@@ -162,7 +162,8 @@ func byteArrayToBigInt(bytes []byte) *big.Int {
 	totalPower := big.NewInt(1)
 	power := big.NewInt(256)
 	bigInt := big.NewInt(0)
-	for _, value := range bytes {
+	for i := len(bytes) - 1; i >= 0; i-- {
+		value := bytes[i]
 		bigValue := big.NewInt(int64(value))
 		bigInt.Add(bigInt, bigValue.Mul(totalPower, bigValue))
 		totalPower.Mul(totalPower, power)
