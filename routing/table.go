@@ -136,10 +136,16 @@ func insort(thisId id.NodeID, closestAddresses []mino.Address,
 	for i, addr := range closestAddresses {
 		curId := id.NewArrayNodeID(addr, thisId.Base(), thisId.Length())
 		if thisId.CloserThan(newId, curId) {
-			tmp := append(closestAddresses[:i], newAddress)
 			// We added an address, therefore the last (fahrthest) address
 			// is not among maxSize closest
-			return append(tmp, closestAddresses[i:maxSize-1]...)
+			rightBound := maxSize - 1
+			if len(closestAddresses)-1 < rightBound {
+				rightBound = len(closestAddresses) - 1
+			}
+			closestAddresses = append(closestAddresses[:i+1],
+				closestAddresses[i:rightBound]...)
+			closestAddresses[i] = newAddress
+			return closestAddresses
 		}
 	}
 	if len(closestAddresses) < maxSize {
