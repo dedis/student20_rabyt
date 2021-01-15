@@ -148,6 +148,15 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 	// the same prefix
 	randomShuffle(addresses)
 
+	dela.Logger.Info().Msg("players:")
+	for _, address := range addresses {
+		if address.Equal(thisAddress) {
+			continue
+		}
+		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
+		dela.Logger.Info().Msgf("%s (%s)", otherId.AsPrefix().Digits, address.String())
+	}
+
 	dela.Logger.Trace().Msgf("%s (%s) built a routing table: ",
 		thisAddress.String(), thisId.AsPrefix().Digits)
 	hopMap := make(map[id.Prefix]mino.Address)
