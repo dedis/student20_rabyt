@@ -476,9 +476,10 @@ func createSimOptions(numNodes int, dockerImage string) []sim.Option {
 }
 
 const (
-	TreeRoutingImage   = "katjag/dela-tree-simulation:best-logs"
-	PrefixRoutingImage = "katjag/prefix-routing-simulation:hop-dst"
-	NaiveRoutingImage  = "katjag/naive-prefix-routing-simulation"
+	TreeRoutingImage    = "katjag/dela-tree-simulation:best-logs"
+	PrefixRoutingImage  = "katjag/prefix-routing-simulation:hop-dst"
+	LeafSetRoutingImage = "katjag/prefix-routing-simulation:leafset"
+	NaiveRoutingImage   = "katjag/naive-prefix-routing-simulation"
 )
 
 func runSimulation(numNodes int, dockerImage string, round simRound) error {
@@ -528,12 +529,13 @@ func main() {
 	var routingProtocol string
 	var s simRound
 	algoToImage := map[string]string{"tree": TreeRoutingImage,
-		"prefix": PrefixRoutingImage, "naive": NaiveRoutingImage}
+		"prefix": PrefixRoutingImage, "naive": NaiveRoutingImage,
+		"leafset": LeafSetRoutingImage}
 
 	flag.BoolVar(&s.noCerts, noCertsFlag, true, "skip certificate exchange")
 	flag.IntVar(&numNodes, numNodesFlag, 10, "the number of nodes for simulation")
 	flag.StringVar(&routingProtocol, protocolFlag, "prefix",
-		"the routing protocol: must be 'tree' or 'prefix'")
+		"the routing protocol: must be 'tree', 'prefix' or 'leafset'")
 	flag.BoolVar(&s.replyAll, replyAllFlag, false,
 		"upon receiving the message from orchestrator, "+
 			"followers send a message to all other participants")
