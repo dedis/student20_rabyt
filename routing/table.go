@@ -176,10 +176,12 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 		closestAddrs = insort(thisId, closestAddrs, address, defaultLeafSetSize)
 	}
 
+	dela.Logger.Info().Msg("Computed leaf set: ")
 	leafSet := make(map[id.Prefix]mino.Address)
 	for _, addr := range closestAddrs {
 		curId := id.NewArrayNodeID(addr, thisId.Base(), thisId.Length())
 		leafSet[curId.AsPrefix()] = addr
+		dela.Logger.Info().Msgf("%s (%s)", curId.AsPrefix().Digits, addr.String())
 	}
 
 	return &RoutingTable{
@@ -299,17 +301,22 @@ func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
 		return nil, nil
 	}
 
-	t.leafSetLock.RLock()
-	defer t.leafSetLock.RUnlock()
-	if _, isLeaf := t.LeafSet[toId.AsPrefix()]; isLeaf {
-		return to, nil
-	}
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
 	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
 	t.nextHopLock.RLock()
 	nextHop, ok := t.NextHop[routingPrefix]
 	t.nextHopLock.RUnlock()
+
+	t.leafSetLock.RLock()
+	defer t.leafSetLock.RUnlock()
+	if _, isLeaf := t.LeafSet[toId.AsPrefix()]; isLeaf {
+		// Log when we used the leaf set to go to a node that is not a next hop
+		if nextHop != nil && !to.Equal(nextHop) {
+			dela.Logger.Info().Msg("used leaf set")
+		}
+		return to, nil
+	}
 	if !ok {
 		dela.Logger.Warn().Stringer("to", to).Msgf("%s: no entry for %s",
 			t.thisNode.AsPrefix().Digits, routingPrefix.Digits)
@@ -382,9 +389,11 @@ func (t *RoutingTable) updateLeafSet(unavailableAddr mino.Address) {
 		closestAddrs = insort(t.thisNode, closestAddrs, address, defaultLeafSetSize)
 	}
 	leafSet := make(map[id.Prefix]mino.Address)
+	dela.Logger.Info().Msg("Recomputed leaf set: ")
 	for _, addr := range closestAddrs {
 		curId := t.addrToId(addr)
 		leafSet[curId.AsPrefix()] = addr
+		dela.Logger.Info().Msgf("%s (%s)", curId.AsPrefix().Digits, addr.String())
 	}
 
 	t.leafSetSorted = closestAddrs
