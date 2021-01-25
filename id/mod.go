@@ -14,9 +14,7 @@ type NodeID interface {
 	Base() byte
 	GetDigit(pos int) byte
 	Equals(other NodeID) bool
-	// Returns true if first id is closer to the current than the second,
-	// false otherwise
-	CloserThan(first NodeID, second NodeID) bool
+	Distance(other NodeID) *big.Int
 	AsBigInt() *big.Int
 	AsPrefix() Prefix
 	CommonPrefix(other NodeID) (Prefix, error)
@@ -85,7 +83,7 @@ func (id ArrayNodeID) Equals(other NodeID) bool {
 }
 
 func (id ArrayNodeID) AsBigInt() *big.Int {
-	return byteArrayToBigInt(id.id)
+	return byteArrayToBigInt(id.id, int64(id.base))
 }
 
 func (id ArrayNodeID) AsPrefix() Prefix {
@@ -134,7 +132,7 @@ func i64Abs(n int64) int64 {
 	return -n
 }
 
-func (id ArrayNodeID) distance(other NodeID) *big.Int {
+func (id ArrayNodeID) Distance(other NodeID) *big.Int {
 	thisInt := id.AsBigInt().Int64()
 	otherInt := other.AsBigInt().Int64()
 	clockwise := i64Abs(thisInt - otherInt)
@@ -150,12 +148,6 @@ func (id ArrayNodeID) distance(other NodeID) *big.Int {
 		return big.NewInt(counterclockwise)
 	}
 	return big.NewInt(clockwise)
-}
-
-// CloserThan returns true if the first id is closer to this id than the second,
-// false otherwise
-func (id ArrayNodeID) CloserThan(first NodeID, second NodeID) bool {
-	return id.distance(first).Cmp(id.distance(second)) < 0
 }
 
 // hash returns a hash of addr as big integer
@@ -179,9 +171,13 @@ func hash(addr mino.Address) *big.Int {
 
 // byteArrayToBigInt converts an array of bytes [b0, b1, b2, ...]
 // to a big int b0 + 256 * b1 + 256 ^ 2 * b2 + ...
-func byteArrayToBigInt(bytes []byte) *big.Int {
+func byteArrayToBigInt(bytes []byte, optional_base ...int64) *big.Int {
 	totalPower := big.NewInt(1)
-	power := big.NewInt(256)
+	var base int64 = 256
+	if len(optional_base) > 0 {
+		base = optional_base[0]
+	}
+	power := big.NewInt(base)
 	bigInt := big.NewInt(0)
 	for i := len(bytes) - 1; i >= 0; i-- {
 		value := bytes[i]

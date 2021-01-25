@@ -122,9 +122,9 @@ func insort(thisId id.NodeID, closestAddresses []mino.Address,
 	newId := id.NewArrayNodeID(newAddress, thisId.Base(), thisId.Length())
 	for i, addr := range closestAddresses {
 		curId := id.NewArrayNodeID(addr, thisId.Base(), thisId.Length())
-		if thisId.CloserThan(newId, curId) {
+		if newId.Distance(thisId).Cmp(curId.Distance(thisId)) < 0 {
 			tmp := append(closestAddresses[:i], newAddress)
-			// We added an address, therefore the last (fahrthest) address
+			// We added an address, therefore the last (farthest) address
 			// is not among maxSize closest
 			return append(tmp, closestAddresses[i:maxSize-1]...)
 		}
@@ -295,7 +295,7 @@ func (t *RoutingTable) closerToDestination(hop id.NodeID, dest id.NodeID) bool {
 	hopPrefix, _ := dest.CommonPrefix(hop)
 	if hopPrefix.Length() == thisPrefix.Length() {
 		// hop is closer to dest than this node
-		return dest.CloserThan(hop, t.thisNode)
+		return hop.Distance(dest).Cmp(t.thisNode.Distance(dest)) < 0
 	}
 	return hopPrefix.Length() > thisPrefix.Length()
 }
