@@ -49,3 +49,21 @@ func Test_byteArrayToBigInt(t *testing.T) {
 	intFromBytes = 255*256*256 + 255
 	require.Equal(t, byteArrayToBigInt(bytes).Int64(), intFromBytes)
 }
+
+func TestArrayNodeID_Distance(t *testing.T) {
+	firstId := ArrayNodeID{
+		id:   []byte{0, 0, 0},
+		base: testBase,
+	}
+	secondId := ArrayNodeID{
+		id:   []byte{testBase - 1, testBase - 1, testBase - 1},
+		base: testBase,
+	}
+	require.Equal(t, int64(1), firstId.Distance(secondId).Int64())
+	thirdId := ArrayNodeID{
+		id:   []byte{1, 0, 0},
+		base: testBase,
+	}
+	var base_i64 = int64(testBase)
+	require.Equal(t, 1 * base_i64 * base_i64, firstId.Distance(thirdId).Int64())
+}
