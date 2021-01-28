@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"errors"
 	"fmt"
 	"github.com/dedis/student20_rabyt/id"
 	"github.com/dedis/student20_rabyt/routing/handshake"
@@ -8,8 +9,11 @@ import (
 	"go.dedis.ch/dela/mino/router"
 	"go.dedis.ch/dela/mino/router/tree/types"
 	"math/rand"
+	"sync"
 	"time"
 )
+
+const defaultLeafSetSize = 5
 
 // RoutingTable is a prefix-based routing implementation of router.RoutingTable.
 // Each entry in the NextHop maps a prefix of this node's id (thisNode) plus
@@ -22,7 +26,18 @@ type RoutingTable struct {
 	thisNode    id.NodeID
 	thisAddress mino.Address
 	NextHop     map[id.Prefix]mino.Address
-	Players     []mino.Address
+	// map from the prefix representation of address to the address.
+	// Used instead of a set
+	LeafSet map[id.Prefix]mino.Address
+	// An internal sorted array of closest addresses
+	leafSetSorted []mino.Address
+	// map from the prefix representation of address to the address
+	FailedHops map[id.Prefix]mino.Address
+	Players    []mino.Address
+
+	nextHopLock    sync.RWMutex
+	leafSetLock    sync.RWMutex
+	failedHopsLock sync.RWMutex
 }
 
 // Router implements router.Router
@@ -102,6 +117,30 @@ func (r *Router) GenerateTableFrom(h router.Handshake) (router.RoutingTable,
 	return r.routingTable, nil
 }
 
+func insort(thisId id.NodeID, closestAddresses []mino.Address,
+	newAddress mino.Address, maxSize int) []mino.Address {
+	newId := id.NewArrayNodeID(newAddress, thisId.Base(), thisId.Length())
+	for i, addr := range closestAddresses {
+		curId := id.NewArrayNodeID(addr, thisId.Base(), thisId.Length())
+		if newId.Distance(thisId).Cmp(curId.Distance(thisId)) < 0 {
+			// We added an address, therefore the last (farthest) address
+			// is not among maxSize closest
+			rightBound := maxSize - 1
+			if len(closestAddresses)-1 < rightBound {
+				rightBound = len(closestAddresses) - 1
+			}
+			closestAddresses = append(closestAddresses[:i+1],
+				closestAddresses[i:rightBound]...)
+			closestAddresses[i] = newAddress
+			return closestAddresses
+		}
+	}
+	if len(closestAddresses) < maxSize {
+		return append(closestAddresses, newAddress)
+	}
+	return closestAddresses
+}
+
 // NewTable constructs a routing table from the addresses of participating nodes.
 // It requires the id of the node, for which the routing table is constructed,
 // to calculate the common prefix of this node's id and other nodes' ids.
@@ -112,26 +151,41 @@ func NewTable(addresses []mino.Address, thisId id.NodeID,
 	randomShuffle(addresses)
 
 	hopMap := make(map[id.Prefix]mino.Address)
+	closestAddrs := make([]mino.Address, 0, defaultLeafSetSize)
 	for _, address := range addresses {
 		if address.Equal(thisAddress) {
 			continue
 		}
 		otherId := id.NewArrayNodeID(address, thisId.Base(), thisId.Length())
 		if otherId.Equals(thisId) {
-			return nil, fmt.Errorf("id collision: id %s for addresses %s" +
+			return nil, fmt.Errorf("id collision: id %s for addresses %s"+
 				" and %s", thisId, thisAddress.String(), address.String())
 		}
 		prefix, err := otherId.CommonPrefixAndFirstDifferentDigit(thisId)
 		if err != nil {
-			return nil, fmt.Errorf("error when calculating common prefix of" +
+			return nil, fmt.Errorf("error when calculating common prefix of"+
 				" ids: %s", err.Error())
 		}
 		if _, contains := hopMap[prefix]; !contains {
 			hopMap[prefix] = address
 		}
+		closestAddrs = insort(thisId, closestAddrs, address, defaultLeafSetSize)
 	}
 
-	return RoutingTable{thisId, thisAddress, hopMap, addresses}, nil
+	leafSet := make(map[id.Prefix]mino.Address)
+	for _, addr := range closestAddrs {
+		curId := id.NewArrayNodeID(addr, thisId.Base(), thisId.Length())
+		leafSet[curId.AsPrefix()] = addr
+	}
+
+	return &RoutingTable{
+		thisNode:      thisId,
+		thisAddress:   thisAddress,
+		NextHop:       hopMap,
+		LeafSet:       leafSet,
+		leafSetSorted: closestAddrs,
+		FailedHops:    make(map[id.Prefix]mino.Address),
+		Players:       addresses}, nil
 }
 
 func randomShuffle(addresses []mino.Address) {
@@ -143,7 +197,7 @@ func randomShuffle(addresses []mino.Address) {
 
 // Make implements router.RoutingTable. It creates a packet with the source
 // address, the destination addresses and the payload.
-func (t RoutingTable) Make(src mino.Address, to []mino.Address,
+func (t *RoutingTable) Make(src mino.Address, to []mino.Address,
 	msg []byte) router.Packet {
 	return types.NewPacket(src, msg, to...)
 }
@@ -151,7 +205,7 @@ func (t RoutingTable) Make(src mino.Address, to []mino.Address,
 // PrepareHandshakeFor implements router.RoutingTable. It creates a handshake
 // that should be sent to the distant peer when opening a relay to it.
 // The peer will then generate its own routing table based on the handshake.
-func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
+func (t *RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 	base, length := id.BaseAndLenFromPlayers(len(t.Players))
 	return handshake.Handshake{IdBase: base, IdLength: length,
 		ThisAddress: to, Addresses: t.Players}
@@ -159,13 +213,18 @@ func (t RoutingTable) PrepareHandshakeFor(to mino.Address) router.Handshake {
 
 // Forward implements router.RoutingTable. It splits the packet into multiple,
 // based on the calculated next hops.
-func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
+func (t *RoutingTable) Forward(packet router.Packet) (router.Routes,
 	router.Voids) {
 	routes := make(router.Routes)
 	voids := make(router.Voids)
 
 	for _, dest := range packet.GetDestination() {
-		gateway := t.GetRoute(dest)
+		gateway, err := t.GetRoute(dest)
+		if err != nil {
+			voids[dest] = router.Void{Error: err}
+			continue
+		}
+
 		p, ok := routes[gateway]
 		// A packet for this next hop hasn't been created yet,
 		// create it and add to routes
@@ -181,27 +240,120 @@ func (t RoutingTable) Forward(packet router.Packet) (router.Routes,
 
 }
 
+func (t *RoutingTable) addrToId(addr mino.Address) id.NodeID {
+	return id.NewArrayNodeID(addr, t.thisNode.Base(), t.thisNode.Length())
+}
+
 // GetRoute implements router.RoutingTable. It calculates the next hop for a
 // given destination.
-func (t RoutingTable) GetRoute(to mino.Address) mino.Address {
-	toId := id.NewArrayNodeID(to, t.thisNode.Base(), t.thisNode.Length())
+func (t *RoutingTable) GetRoute(to mino.Address) (mino.Address, error) {
+	// Client side of the orchestrator or the server side of the orchestrator
+	// which is the only player
+	if len(t.Players) == 1 {
+		return nil, nil
+	}
+	toId := t.addrToId(to)
 	// Since id collisions are not expected, the only way this can happen is
 	// if this node is orchestrator's server side and the message is routed to
 	// orchestrator's client side. The only way the message can reach it is if
 	// it is routed to nil.
 	if toId.Equals(t.thisNode) && !to.Equal(t.thisAddress) {
-		return nil
+		return nil, nil
+	}
+
+	t.leafSetLock.RLock()
+	defer t.leafSetLock.RUnlock()
+	if _, isLeaf := t.LeafSet[toId.AsPrefix()]; isLeaf {
+		return to, nil
 	}
 	// Take the common prefix of this node and destination + first differing
 	// digit of the destination
 	routingPrefix, _ := toId.CommonPrefixAndFirstDifferentDigit(t.thisNode)
-	return t.NextHop[routingPrefix]
+	t.nextHopLock.RLock()
+	nextHop, ok := t.NextHop[routingPrefix]
+	t.nextHopLock.RUnlock()
+	if !ok {
+		return nil, errors.New("No route to " + to.String())
+	}
+	// Find an alternative next hop
+	if t.isUnreachable(nextHop) {
+		for _, addr := range t.Players {
+			curId := t.addrToId(addr)
+			if !t.isUnreachable(addr) && t.closerToDestination(curId, toId) {
+				// overwrite the next hop to dest with the alternative
+				t.nextHopLock.Lock()
+				t.NextHop[routingPrefix] = addr
+				t.nextHopLock.Unlock()
+				return addr, nil
+			}
+		}
+		// no alternative found, delete the entry
+		t.nextHopLock.Lock()
+		delete(t.NextHop, routingPrefix)
+		t.nextHopLock.Unlock()
+		return nil, errors.New("No route to " + to.String())
+	}
+	return nextHop, nil
 }
 
-// OnFailure implements router.RoutingTable. It changes the next hop for a
-// given destination because the provided next hop is not available.
-func (t RoutingTable) OnFailure(to mino.Address) error {
-	// TODO: keep redundancy in the routing table, use the alternative hop
-	// and mark this node as unreachable
+func (t *RoutingTable) closerToDestination(hop id.NodeID, dest id.NodeID) bool {
+	thisPrefix, _ := dest.CommonPrefix(t.thisNode)
+	hopPrefix, _ := dest.CommonPrefix(hop)
+	if hopPrefix.Length() == thisPrefix.Length() {
+		// hop is closer to dest than this node
+		return hop.Distance(dest).Cmp(t.thisNode.Distance(dest)) < 0
+	}
+	return hopPrefix.Length() > thisPrefix.Length()
+}
+
+func (t *RoutingTable) isUnreachable(addr mino.Address) bool {
+	t.failedHopsLock.RLock()
+	defer t.failedHopsLock.RUnlock()
+	_, is := t.FailedHops[t.addrToId(addr).AsPrefix()]
+	return is
+}
+
+func (t *RoutingTable) markUnreachable(addr mino.Address) {
+	nodeId := t.addrToId(addr)
+	t.failedHopsLock.Lock()
+	t.FailedHops[nodeId.AsPrefix()] = addr
+	t.failedHopsLock.Unlock()
+}
+
+func (t *RoutingTable) updateLeafSet(unavailableAddr mino.Address) {
+	nodeId := t.addrToId(unavailableAddr)
+	t.leafSetLock.Lock()
+	defer t.leafSetLock.Unlock()
+
+	// Already removed from leaf set
+	if _, stillLeaf := t.LeafSet[nodeId.AsPrefix()]; !stillLeaf {
+		return
+	}
+
+	// Simply recompute the leaf set.
+	// Not so expensive since it has a small constant size
+	closestAddrs := make([]mino.Address, 0, defaultLeafSetSize)
+	for _, address := range t.Players {
+		if address.Equal(t.thisAddress) || t.isUnreachable(address) {
+			continue
+		}
+		closestAddrs = insort(t.thisNode, closestAddrs, address, defaultLeafSetSize)
+	}
+	leafSet := make(map[id.Prefix]mino.Address)
+	for _, addr := range closestAddrs {
+		curId := t.addrToId(addr)
+		leafSet[curId.AsPrefix()] = addr
+	}
+
+	t.leafSetSorted = closestAddrs
+	t.LeafSet = leafSet
+}
+
+// OnFailure implements router.RoutingTable. It marks an address as unreachable
+// from this node, so that it is not chosen as next hop
+func (t *RoutingTable) OnFailure(nextHop mino.Address) error {
+	t.markUnreachable(nextHop)
+	// mark unreachable before updating the leaf set
+	t.updateLeafSet(nextHop)
 	return nil
 }

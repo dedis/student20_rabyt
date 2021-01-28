@@ -38,14 +38,32 @@ func TestArrayNodeID_FollowerEqualOrchestrator(t *testing.T) {
 
 func Test_byteArrayToBigInt(t *testing.T) {
 	bytes := []byte{1, 2, 3, 4}
-	var intFromBytes int64 = 1 + 2*256 + 3*256*256 + 4*256*256*256
+	var intFromBytes int64 = 1*256*256*256 + 2*256*256 + 3*256 + 4
 	require.Equal(t, byteArrayToBigInt(bytes).Int64(), intFromBytes)
 
 	bytes = []byte{255, 255, 255}
-	intFromBytes = 255 + 255*256 + 255*256*256
+	intFromBytes = 255*256*256 + 255*256 + 255
 	require.Equal(t, byteArrayToBigInt(bytes).Int64(), intFromBytes)
 
 	bytes = []byte{255, 0, 255}
-	intFromBytes = 255 + 255*256*256
+	intFromBytes = 255*256*256 + 255
 	require.Equal(t, byteArrayToBigInt(bytes).Int64(), intFromBytes)
+}
+
+func TestArrayNodeID_Distance(t *testing.T) {
+	firstId := ArrayNodeID{
+		id:   []byte{0, 0, 0},
+		base: testBase,
+	}
+	secondId := ArrayNodeID{
+		id:   []byte{testBase - 1, testBase - 1, testBase - 1},
+		base: testBase,
+	}
+	require.Equal(t, int64(1), firstId.Distance(secondId).Int64())
+	thirdId := ArrayNodeID{
+		id:   []byte{1, 0, 0},
+		base: testBase,
+	}
+	var base_i64 = int64(testBase)
+	require.Equal(t, 1 * base_i64 * base_i64, firstId.Distance(thirdId).Int64())
 }
